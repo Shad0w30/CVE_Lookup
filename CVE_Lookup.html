@@ -1,0 +1,293 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CVE Lookup Tool</title>
+    <link href="https://unpkg.com/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center">
+    <div class="container mx-auto p-4 max-w-4xl">
+        <h1 class="text-3xl font-bold text-center mb-6">CVE Lookup Tool</h1>
+        <div class="bg-white p-6 rounded-lg shadow-md">
+            <div class="mb-4">
+                <label for="cveInput" class="block text-lg font-medium text-gray-700">Enter CVE IDs (comma-separated or on new lines, e.g., CVE-2021-44228, CVE-2020-12345):</label>
+                <textarea id="cveInput" rows="5" class="mt-2 w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="CVE-2021-44228, CVE-2020-12345\nCVE-2019-0708"></textarea>
+                <p class="mt-2 text-sm text-gray-500">Enter CVE IDs separated by commas, new lines, or both. Only IDs starting with 'CVE-' are processed.</p>
+            </div>
+            <div class="flex space-x-4">
+                <button id="searchButton" class="flex-1 bg-blue-500 text-white p-3 rounded-lg hover:bg-blue-600 transition">Search CVEs</button>
+                <button id="downloadButton" class="flex-1 bg-green-500 text-white p-3 rounded-lg hover:bg-green-600 transition hidden">Download as Excel</button>
+            </div>
+            <div id="loading" class="hidden mt-4 text-center text-gray-600">Loading...</div>
+            <div id="error" class="hidden mt-4 text-center text-red-600"></div>
+            <div id="results" class="mt-6"></div>
+        </div>
+    </div>
+
+    <script>
+        const searchButton = document.getElementById('searchButton');
+        const downloadButton = document.getElementById('downloadButton');
+        const cveInput = document.getElementById('cveInput');
+        const loading = document.getElementById('loading');
+        const errorDiv = document.getElementById('error');
+        const resultsDiv = document.getElementById('results');
+        let cveResults = [];
+
+        async function fetchWithRetry(url, maxRetries = 3, delay = 5000) {
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    const response = await fetch(url);
+                    if (response.status === 429) {
+                        if (attempt === maxRetries) throw new Error('Rate limit exceeded');
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        continue;
+                    }
+                    if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
+                    return response;
+                } catch (error) {
+                    if (attempt === maxRetries) throw error;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+        }
+
+        async function fetchNVDData(cveId) {
+            const url = `https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=${cveId}`;
+            try {
+                const response = await fetchWithRetry(url);
+                const data = await response.json();
+                if (!data.vulnerabilities || data.vulnerabilities.length === 0) {
+                    throw new Error('CVE not found');
+                }
+                return data.vulnerabilities[0].cve;
+            } catch (error) {
+                console.error(`Error fetching NVD data for ${cveId}:`, error);
+                return { error: error.message === 'CVE not found' ? `No data found for ${cveId}` : `Failed to fetch NVD data for ${cveId}: ${error.message}` };
+            }
+        }
+
+        async function fetchEPSSData(cveId) {
+            const url = `https://api.first.org/data/v1/epss?cve=${cveId}`;
+            try {
+                const response = await fetchWithRetry(url);
+                const data = await response.json();
+                return data.data[0]?.epss || null;
+            } catch (error) {
+                console.error(`Error fetching EPSS data for ${cveId}:`, error);
+                return null;
+            }
+        }
+
+        function formatDate(dateString) {
+            if (!dateString) return 'N/A';
+            return new Date(dateString).toLocaleDateString();
+        }
+
+        function getVulnerablePackage(cveData) {
+            if (cveData.error) return cveData.error;
+            const configurations = cveData?.configurations || [];
+            for (const config of configurations) {
+                for (const node of config.nodes) {
+                    for (const cpe of node.cpeMatch) {
+                        if (cpe.criteria) {
+                            const parts = cpe.criteria.split(':');
+                            return parts[3] && parts[4] ? `${parts[3]}:${parts[4]}` : 'N/A';
+                        }
+                    }
+                }
+            }
+            return 'N/A';
+        }
+
+        function getFixedVersion(cveData) {
+            if (cveData.error) return cveData.error;
+            const references = cveData?.references || [];
+            for (const ref of references) {
+                if (ref.url.includes('github.com') || ref.url.includes('patch')) {
+                    const match = ref.url.match(/(\d+\.\d+\.\d+)/);
+                    if (match) return match[0];
+                }
+            }
+            return 'N/A';
+        }
+
+        function getStatus(cveData) {
+            if (cveData.error) return cveData.error;
+            const descriptions = cveData?.descriptions || [];
+            for (const desc of descriptions) {
+                if (desc.value.includes('fixed in') || desc.value.includes('resolved')) {
+                    return 'Fixed';
+                }
+            }
+            return 'Open';
+        }
+
+        function parseCVEInput(input) {
+            return input
+                .split(/[\n,]+/)
+                .map(cve => cve.trim())
+                .filter(cve => cve && cve.match(/^CVE-\d{4}-\d{4,7}$/i))
+                .map(cve => cve.toUpperCase());
+        }
+
+        function downloadExcel() {
+            const worksheetData = cveResults.map(result => ({
+                'CVE ID': result.cveId,
+                'CVSS Score': result.error || result.cvssScore,
+                'EPSS Score': result.error || result.epssScore,
+                'Discovery Date': result.error || result.discoveryDate,
+                'Vulnerable Package': result.error || result.vulnerablePackage,
+                'Fixed Version': result.error || result.fixedVersion,
+                'Status': result.error || result.status
+            }));
+
+            const worksheet = XLSX.utils.json_to_sheet(worksheetData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, 'CVE Results');
+            XLSX.writeFile(workbook, 'cve_results.xlsx');
+        }
+
+        async function searchCVEs() {
+            const cveList = parseCVEInput(cveInput.value);
+            if (cveList.length === 0) {
+                errorDiv.textContent = 'Please enter valid CVE IDs starting with "CVE-" (e.g., CVE-2021-44228)';
+                errorDiv.classList.remove('hidden');
+                resultsDiv.innerHTML = '';
+                downloadButton.classList.add('hidden');
+                return;
+            }
+
+            loading.classList.remove('hidden');
+            errorDiv.classList.add('hidden');
+            resultsDiv.innerHTML = '';
+            downloadButton.classList.add('hidden');
+            cveResults = [];
+
+            for (const cveId of cveList) {
+                const [nvdData, epssScore] = await Promise.all([
+                    fetchNVDData(cveId),
+                    fetchEPSSData(cveId)
+                ]);
+
+                if (nvdData.error) {
+                    cveResults.push({
+                        cveId,
+                        error: nvdData.error
+                    });
+                    continue;
+                }
+
+                const cvssData = nvdData.metrics?.cvssMetricV31?.[0]?.cvssData || nvdData.metrics?.cvssMetricV30?.[0]?.cvssData || {};
+                const cvssScore = cvssData.baseScore || 'N/A';
+                const discoveryDate = formatDate(nvdData.published);
+                const vulnerablePackage = getVulnerablePackage(nvdData);
+                const fixedVersion = getFixedVersion(nvdData);
+                const status = getStatus(nvdData);
+
+                cveResults.push({
+                    cveId,
+                    cvssScore,
+                    epssScore: epssScore ? (epssScore * 100).toFixed(2) + '%' : 'N/A',
+                    discoveryDate,
+                    vulnerablePackage,
+                    fixedVersion,
+                    status
+                });
+
+                // Delay to respect NVD rate limits (6 requests per 30s = ~5s per request)
+                await new Promise(resolve => setTimeout(resolve, 5000));
+            }
+
+            loading.classList.add('hidden');
+            if (cveResults.length === 0) {
+                errorDiv.textContent = 'No valid CVE data found.';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+
+            resultsDiv.innerHTML = `
+                <div class="overflow-x-auto">
+                    <table class="w-full border-collapse bg-white rounded-lg shadow-md">
+                        <thead>
+                            <tr class="bg-gray-200">
+                                <th class="p-3 text-left">CVE ID</th>
+                                <th class="p-3 text-left">CVSS Score</th>
+                                <th class="p-3 text-left">EPSS Score</th>
+                                <th class="p-3 text-left">Discovery Date</th>
+                                <th class="p-3 text-left">Vulnerable Package</th>
+                                <th class="p-3 text-left">Fixed Version</th>
+                                <th class="p-3 text-left">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${cveResults.map(result => `
+                                <tr class="border-t">
+                                    <td class="p-3">${result.cveId}</td>
+                                    <td class="p-3">${result.error || result.cvssScore}</td>
+                                    <td class="p-3">${result.error || result.epssScore}</td>
+                                    <td class="p-3">${result.error || result.discoveryDate}</td>
+                                    <td class="p-3">${result.error || result.vulnerablePackage}</td>
+                                    <td class="p-3">${result.error || result.fixedVersion}</td>
+                                    <td class="p-3">${result.error || result.status}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
+            downloadButton.classList.remove('hidden');
+        }
+
+        searchButton.addEventListener('click', searchCVEs);
+        downloadButton.addEventListener('click', downloadExcel);
+        cveInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                searchCVEs();
+            }
+        });
+    </script>
+</body>
+</html>
