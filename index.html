@@ -1,78 +1,89 @@
-<!-- test --><script type="text/javascript">
-        var gk_isXlsx = false;
-        var gk_xlsxFileLookup = {};
-        var gk_fileData = {};
-        function filledCell(cell) {
-          return cell !== '' && cell != null;
-        }
-        function loadFileData(filename) {
-        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
-            try {
-                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
-                var firstSheetName = workbook.SheetNames[0];
-                var worksheet = workbook.Sheets[firstSheetName];
-
-                // Convert sheet to JSON to filter blank rows
-                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
-                // Filter out blank rows (rows where all cells are empty, null, or undefined)
-                var filteredData = jsonData.filter(row => row.some(filledCell));
-
-                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
-                var headerRowIndex = filteredData.findIndex((row, index) =>
-                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
-                );
-                // Fallback
-                if (headerRowIndex === -1 || headerRowIndex > 25) {
-                  headerRowIndex = 0;
-                }
-
-                // Convert filtered JSON back to CSV
-                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
-                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
-                return csv;
-            } catch (e) {
-                console.error(e);
-                return "";
-            }
-        }
-        return gk_fileData[filename] || "";
-        }
-        </script><!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CVE Lookup</title>
+    <title>Enhanced CVE Lookup</title>
     <link href="https://unpkg.com/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
-<body class="bg-gray-100 min-h-screen flex items-center justify-center">
-    <div class="container mx-auto p-4 max-w-4xl">
-        <h1 class="text-3xl font-bold text-center mb-6">CVE Lookup</h1>
-        <div class="bg-white p-6 rounded-lg shadow-md">
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto p-4 max-w-6xl">
+        <h1 class="text-3xl font-bold text-center mb-6">Enhanced CVE Lookup</h1>
+        <div class="bg-white p-6 rounded-lg shadow-md mb-6">
             <div class="mb-4">
                 <label for="cveInput" class="block text-lg font-medium text-gray-700">Enter CVE IDs (comma-separated or on new lines, e.g., CVE-2021-44228, CVE-2020-12345):</label>
                 <textarea id="cveInput" rows="5" class="mt-2 w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="CVE-2021-44228, CVE-2020-12345\nCVE-2019-0708"></textarea>
                 <p class="mt-2 text-sm text-gray-500">Enter CVE IDs separated by commas, new lines, or both. Only IDs starting with 'CVE-' are processed.</p>
             </div>
-            <div class="flex space-x-4">
-                <button id="searchButton" class="flex-1 bg-blue-500 text-white p-3 rounded-lg hover:bg-blue-600 transition">Search CVEs</button>
-                <button id="downloadButton" class="flex-1 bg-green-500 text-white p-3 rounded-lg hover:bg-green-600 transition hidden">Download as Excel</button>
+            <div class="flex flex-wrap gap-4">
+                <button id="searchButton" class="flex-1 bg-blue-500 text-white p-3 rounded-lg hover:bg-blue-600 transition">
+                    <i class="fas fa-search mr-2"></i>Search CVEs
+                </button>
+                <button id="downloadButton" class="flex-1 bg-green-500 text-white p-3 rounded-lg hover:bg-green-600 transition hidden">
+                    <i class="fas fa-file-excel mr-2"></i>Download as Excel
+                </button>
+                <button id="clearButton" class="flex-1 bg-gray-500 text-white p-3 rounded-lg hover:bg-gray-600 transition">
+                    <i class="fas fa-broom mr-2"></i>Clear Results
+                </button>
             </div>
-            <div id="loading" class="hidden mt-4 text-center text-gray-600">Loading...</div>
-            <div id="error" class="hidden mt-4 text-center text-red-600"></div>
-            <div id="results" class="mt-6"></div>
+            <div id="loading" class="hidden mt-4 text-center text-gray-600">
+                <i class="fas fa-spinner fa-spin mr-2"></i>Loading CVE data from multiple sources...
+            </div>
+            <div id="error" class="hidden mt-4 p-4 text-center text-red-600 bg-red-100 rounded-lg"></div>
         </div>
+
+        <div id="results" class="space-y-6"></div>
     </div>
 
     <script>
         const searchButton = document.getElementById('searchButton');
         const downloadButton = document.getElementById('downloadButton');
+        const clearButton = document.getElementById('clearButton');
         const cveInput = document.getElementById('cveInput');
         const loading = document.getElementById('loading');
         const errorDiv = document.getElementById('error');
         const resultsDiv = document.getElementById('results');
         let cveResults = [];
+
+        // List of CVE data sources with their APIs
+        const CVE_SOURCES = {
+            NVD: {
+                name: "National Vulnerability Database",
+                url: cveId => `https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=${cveId}`,
+                parse: data => data.vulnerabilities?.[0]?.cve || null
+            },
+            CIRCL: {
+                name: "CIRCL Luxembourg",
+                url: cveId => `https://cve.circl.lu/api/cve/${cveId}`,
+                parse: data => data || null
+            },
+            MITRE: {
+                name: "MITRE CVE Database",
+                url: cveId => `https://cveawg.mitre.org/api/cve/${cveId}`,
+                parse: data => data || null
+            },
+            VULNERS: {
+                name: "Vulners",
+                url: cveId => `https://vulners.com/api/v3/search/lucene/?query=cveId:${cveId}`,
+                parse: data => data.data?.search?.[0]?._source || null
+            }
+        };
+
+        // Additional data sources
+        const ADDITIONAL_SOURCES = {
+            EPSS: {
+                name: "Exploit Prediction Scoring System (EPSS)",
+                url: cveId => `https://api.first.org/data/v1/epss?cve=${cveId}`,
+                parse: data => data.data?.[0] || null
+            },
+            CVE_DETAILS: {
+                name: "CVE Details",
+                url: cveId => `https://www.cvedetails.com/json-feed.php?cve_id=${cveId}`,
+                parse: data => data?.[0] || null
+            }
+        };
 
         async function fetchWithRetry(url, maxRetries = 3, delay = 5000) {
             for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -84,7 +95,7 @@
                         continue;
                     }
                     if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
-                    return response;
+                    return await response.json();
                 } catch (error) {
                     if (attempt === maxRetries) throw error;
                     await new Promise(resolve => setTimeout(resolve, delay));
@@ -92,31 +103,34 @@
             }
         }
 
-        async function fetchNVDData(cveId) {
-            const url = `https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=${cveId}`;
-            try {
-                const response = await fetchWithRetry(url);
-                const data = await response.json();
-                if (!data.vulnerabilities || data.vulnerabilities.length === 0) {
-                    throw new Error('CVE not found');
+        async function fetchAllSources(cveId) {
+            const results = {};
+            
+            // Fetch from primary CVE sources
+            for (const [sourceName, source] of Object.entries(CVE_SOURCES)) {
+                try {
+                    const data = await fetchWithRetry(source.url(cveId));
+                    results[sourceName] = source.parse(data);
+                    if (!results[sourceName]) throw new Error('No data returned');
+                } catch (error) {
+                    console.error(`Error fetching ${sourceName} data for ${cveId}:`, error);
+                    results[sourceName] = { error: `Failed to fetch from ${sourceName}` };
                 }
-                return data.vulnerabilities[0].cve;
-            } catch (error) {
-                console.error(`Error fetching NVD data for ${cveId}:`, error);
-                return { error: error.message === 'CVE not found' ? `No data found for ${cveId}` : `Failed to fetch NVD data for ${cveId}: ${error.message}` };
             }
-        }
-
-        async function fetchEPSSData(cveId) {
-            const url = `https://api.first.org/data/v1/epss?cve=${cveId}`;
-            try {
-                const response = await fetchWithRetry(url);
-                const data = await response.json();
-                return data.data[0]?.epss || null;
-            } catch (error) {
-                console.error(`Error fetching EPSS data for ${cveId}:`, error);
-                return null;
+            
+            // Fetch from additional sources
+            for (const [sourceName, source] of Object.entries(ADDITIONAL_SOURCES)) {
+                try {
+                    const data = await fetchWithRetry(source.url(cveId));
+                    results[sourceName] = source.parse(data);
+                    if (!results[sourceName]) throw new Error('No data returned');
+                } catch (error) {
+                    console.error(`Error fetching ${sourceName} data for ${cveId}:`, error);
+                    results[sourceName] = { error: `Failed to fetch from ${sourceName}` };
+                }
             }
+            
+            return results;
         }
 
         function formatDate(dateString) {
@@ -124,43 +138,135 @@
             return new Date(dateString).toLocaleDateString();
         }
 
-        function getVulnerablePackage(cveData) {
-            if (cveData.error) return cveData.error;
-            const configurations = cveData?.configurations || [];
-            for (const config of configurations) {
-                for (const node of config.nodes) {
-                    for (const cpe of node.cpeMatch) {
-                        if (cpe.criteria) {
-                            const parts = cpe.criteria.split(':');
-                            return parts[3] && parts[4] ? `${parts[3]}:${parts[4]}` : 'N/A';
+        function getCVSSScore(data) {
+            if (data.NVD?.metrics?.cvssMetricV31?.[0]?.cvssData?.baseScore) {
+                return data.NVD.metrics.cvssMetricV31[0].cvssData.baseScore;
+            }
+            if (data.NVD?.metrics?.cvssMetricV30?.[0]?.cvssData?.baseScore) {
+                return data.NVD.metrics.cvssMetricV30[0].cvssData.baseScore;
+            }
+            if (data.CIRCL?.cvss) {
+                return data.CIRCL.cvss;
+            }
+            if (data.VULNERS?.cvss?.score) {
+                return data.VULNERS.cvss.score;
+            }
+            return 'N/A';
+        }
+
+        function getSeverity(data) {
+            if (data.NVD?.metrics?.cvssMetricV31?.[0]?.cvssData?.baseSeverity) {
+                return data.NVD.metrics.cvssMetricV31[0].cvssData.baseSeverity;
+            }
+            if (data.NVD?.metrics?.cvssMetricV30?.[0]?.cvssData?.baseSeverity) {
+                return data.NVD.metrics.cvssMetricV30[0].cvssData.baseSeverity;
+            }
+            if (data.CIRCL?.cvss) {
+                const score = parseFloat(data.CIRCL.cvss);
+                if (score >= 9.0) return 'CRITICAL';
+                if (score >= 7.0) return 'HIGH';
+                if (score >= 4.0) return 'MEDIUM';
+                return 'LOW';
+            }
+            if (data.VULNERS?.cvss?.score) {
+                const score = parseFloat(data.VULNERS.cvss.score);
+                if (score >= 9.0) return 'CRITICAL';
+                if (score >= 7.0) return 'HIGH';
+                if (score >= 4.0) return 'MEDIUM';
+                return 'LOW';
+            }
+            return 'N/A';
+        }
+
+        function getDescription(data) {
+            if (data.NVD?.descriptions) {
+                const enDesc = data.NVD.descriptions.find(d => d.lang === 'en');
+                if (enDesc) return enDesc.value;
+            }
+            if (data.CIRCL?.summary) {
+                return data.CIRCL.summary;
+            }
+            if (data.VULNERS?.description) {
+                return data.VULNERS.description;
+            }
+            if (data.MITRE?.descriptions) {
+                const enDesc = data.MITRE.descriptions.find(d => d.lang === 'en');
+                if (enDesc) return enDesc.value;
+            }
+            return 'No description available';
+        }
+
+        function getVulnerableProducts(data) {
+            const products = new Set();
+            
+            // From NVD
+            if (data.NVD?.configurations) {
+                for (const config of data.NVD.configurations) {
+                    for (const node of config.nodes) {
+                        for (const cpe of node.cpeMatch || []) {
+                            if (cpe.criteria) {
+                                const parts = cpe.criteria.split(':');
+                                if (parts[3] && parts[4]) {
+                                    products.add(`${parts[3]}:${parts[4]}`);
+                                }
+                            }
                         }
                     }
                 }
             }
-            return 'N/A';
-        }
-
-        function getFixedVersion(cveData) {
-            if (cveData.error) return cveData.error;
-            const references = cveData?.references || [];
-            for (const ref of references) {
-                if (ref.url.includes('github.com') || ref.url.includes('patch')) {
-                    const match = ref.url.match(/(\d+\.\d+\.\d+)/);
-                    if (match) return match[0];
+            
+            // From CIRCL
+            if (data.CIRCL?.vulnerable_configuration) {
+                for (const config of data.CIRCL.vulnerable_configuration) {
+                    const parts = config.split(':');
+                    if (parts[3] && parts[4]) {
+                        products.add(`${parts[3]}:${parts[4]}`);
+                    }
                 }
             }
-            return 'N/A';
-        }
-
-        function getStatus(cveData) {
-            if (cveData.error) return cveData.error;
-            const descriptions = cveData?.descriptions || [];
-            for (const desc of descriptions) {
-                if (desc.value.includes('fixed in') || desc.value.includes('resolved')) {
-                    return 'Fixed';
+            
+            // From Vulners
+            if (data.VULNERS?.affectedProducts) {
+                for (const product of data.VULNERS.affectedProducts) {
+                    products.add(product);
                 }
             }
-            return 'Open';
+            
+            return Array.from(products).join(', ') || 'N/A';
+        }
+
+        function getReferences(data) {
+            const references = new Set();
+            
+            // From NVD
+            if (data.NVD?.references) {
+                for (const ref of data.NVD.references) {
+                    if (ref.url) references.add(ref.url);
+                }
+            }
+            
+            // From CIRCL
+            if (data.CIRCL?.references) {
+                for (const ref of data.CIRCL.references) {
+                    references.add(ref);
+                }
+            }
+            
+            // From MITRE
+            if (data.MITRE?.references) {
+                for (const ref of data.MITRE.references) {
+                    if (ref.url) references.add(ref.url);
+                }
+            }
+            
+            // From Vulners
+            if (data.VULNERS?.references) {
+                for (const ref of data.VULNERS.references) {
+                    references.add(ref);
+                }
+            }
+            
+            return Array.from(references);
         }
 
         function parseCVEInput(input) {
@@ -174,18 +280,31 @@
         function downloadExcel() {
             const worksheetData = cveResults.map(result => ({
                 'CVE ID': result.cveId,
-                'CVSS Score': result.error || result.cvssScore,
-                'EPSS Score': result.error || result.epssScore,
-                'Discovery Date': result.error || result.discoveryDate,
-                'Vulnerable Package': result.error || result.vulnerablePackage,
-                'Fixed Version': result.error || result.fixedVersion,
-                'Status': result.error || result.status
+                'CVSS Score': result.cvssScore,
+                'Severity': result.severity,
+                'EPSS Score': result.epssScore,
+                'Published Date': result.publishedDate,
+                'Last Modified': result.lastModified,
+                'Vulnerable Products': result.vulnerableProducts,
+                'Description': result.description,
+                'Sources': Object.entries(result.sources)
+                    .filter(([_, data]) => !data.error)
+                    .map(([name, _]) => name)
+                    .join(', ')
             }));
 
             const worksheet = XLSX.utils.json_to_sheet(worksheetData);
             const workbook = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(workbook, worksheet, 'CVE Results');
             XLSX.writeFile(workbook, 'cve_results.xlsx');
+        }
+
+        function clearResults() {
+            cveInput.value = '';
+            resultsDiv.innerHTML = '';
+            errorDiv.classList.add('hidden');
+            downloadButton.classList.add('hidden');
+            cveResults = [];
         }
 
         async function searchCVEs() {
@@ -205,85 +324,135 @@
             cveResults = [];
 
             for (const cveId of cveList) {
-                const [nvdData, epssScore] = await Promise.all([
-                    fetchNVDData(cveId),
-                    fetchEPSSData(cveId)
-                ]);
-
-                if (nvdData.error) {
+                try {
+                    const sourcesData = await fetchAllSources(cveId);
+                    
+                    const cvssScore = getCVSSScore(sourcesData);
+                    const severity = getSeverity(sourcesData);
+                    const description = getDescription(sourcesData);
+                    const vulnerableProducts = getVulnerableProducts(sourcesData);
+                    const references = getReferences(sourcesData);
+                    const publishedDate = formatDate(sourcesData.NVD?.published || sourcesData.CIRCL?.Published || sourcesData.VULNERS?.published);
+                    const lastModified = formatDate(sourcesData.NVD?.lastModified || sourcesData.CIRCL?.Modified || sourcesData.VULNERS?.modified);
+                    const epssScore = sourcesData.EPSS?.epss ? (sourcesData.EPSS.epss * 100).toFixed(2) + '%' : 'N/A';
+                    
                     cveResults.push({
                         cveId,
-                        error: nvdData.error
+                        cvssScore,
+                        severity,
+                        epssScore,
+                        publishedDate,
+                        lastModified,
+                        vulnerableProducts,
+                        description,
+                        references,
+                        sources: sourcesData
                     });
-                    continue;
+
+                    // Display results as they come in
+                    renderCVEResult(cveResults[cveResults.length - 1]);
+                    
+                    // Delay to respect rate limits (especially for NVD)
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                } catch (error) {
+                    console.error(`Error processing ${cveId}:`, error);
+                    cveResults.push({
+                        cveId,
+                        error: `Failed to fetch data for ${cveId}: ${error.message}`
+                    });
+                    renderCVEResult(cveResults[cveResults.length - 1]);
                 }
-
-                const cvssData = nvdData.metrics?.cvssMetricV31?.[0]?.cvssData || nvdData.metrics?.cvssMetricV30?.[0]?.cvssData || {};
-                const cvssScore = cvssData.baseScore || 'N/A';
-                const discoveryDate = formatDate(nvdData.published);
-                const vulnerablePackage = getVulnerablePackage(nvdData);
-                const fixedVersion = getFixedVersion(nvdData);
-                const status = getStatus(nvdData);
-
-                cveResults.push({
-                    cveId,
-                    cvssScore,
-                    epssScore: epssScore ? (epssScore * 100).toFixed(2) + '%' : 'N/A',
-                    discoveryDate,
-                    vulnerablePackage,
-                    fixedVersion,
-                    status
-                });
-
-                // Delay to respect NVD rate limits (6 requests per 30s = ~5s per request)
-                await new Promise(resolve => setTimeout(resolve, 5000));
             }
 
             loading.classList.add('hidden');
-            if (cveResults.length === 0) {
-                errorDiv.textContent = 'No valid CVE data found.';
-                errorDiv.classList.remove('hidden');
+            if (cveResults.some(r => !r.error)) {
+                downloadButton.classList.remove('hidden');
+            }
+        }
+
+        function renderCVEResult(result) {
+            if (result.error) {
+                const errorCard = document.createElement('div');
+                errorCard.className = 'bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-4 rounded';
+                errorCard.innerHTML = `
+                    <div class="flex items-center">
+                        <i class="fas fa-exclamation-circle mr-2"></i>
+                        <strong>${result.cveId}:</strong> ${result.error}
+                    </div>
+                `;
+                resultsDiv.appendChild(errorCard);
                 return;
             }
 
-            resultsDiv.innerHTML = `
-                <div class="overflow-x-auto">
-                    <table class="w-full border-collapse bg-white rounded-lg shadow-md">
-                        <thead>
-                            <tr class="bg-gray-200">
-                                <th class="p-3 text-left">CVE ID</th>
-                                <th class="p-3 text-left">CVSS Score</th>
-                                <th class="p-3 text-left">EPSS Score</th>
-                                <th class="p-3 text-left">Discovery Date</th>
-                                <th class="p-3 text-left">Vulnerable Package</th>
-                                <th class="p-3 text-left">Fixed Version</th>
-                                <th class="p-3 text-left">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${cveResults.map(result => `
-                                <tr class="border-t">
-                                    <td class="p-3">${result.cveId}</td>
-                                    <td class="p-3">${result.error || result.cvssScore}</td>
-                                    <td class="p-3">${result.error || result.epssScore}</td>
-                                    <td class="p-3">${result.error || result.discoveryDate}</td>
-                                    <td class="p-3">${result.error || result.vulnerablePackage}</td>
-                                    <td class="p-3">${result.error || result.fixedVersion}</td>
-                                    <td class="p-3">${result.error || result.status}</td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
+            const card = document.createElement('div');
+            card.className = 'bg-white p-6 rounded-lg shadow-md mb-6';
+            
+            // Header with CVE ID and severity
+            let severityColor = 'gray';
+            if (result.severity === 'CRITICAL') severityColor = 'red';
+            else if (result.severity === 'HIGH') severityColor = 'orange';
+            else if (result.severity === 'MEDIUM') severityColor = 'yellow';
+            else if (result.severity === 'LOW') severityColor = 'green';
+            
+            card.innerHTML = `
+                <div class="flex justify-between items-start mb-4">
+                    <h2 class="text-2xl font-bold">${result.cveId}</h2>
+                    <span class="px-3 py-1 rounded-full text-sm font-semibold bg-${severityColor}-100 text-${severityColor}-800">
+                        ${result.severity} (CVSS: ${result.cvssScore})
+                    </span>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <h3 class="font-semibold text-gray-700 mb-2">Description</h3>
+                        <p class="text-gray-800">${result.description}</p>
+                    </div>
+                    <div>
+                        <h3 class="font-semibold text-gray-700 mb-2">Details</h3>
+                        <div class="space-y-2">
+                            <p><span class="font-medium">Published:</span> ${result.publishedDate}</p>
+                            <p><span class="font-medium">Last Modified:</span> ${result.lastModified}</p>
+                            <p><span class="font-medium">EPSS Score:</span> ${result.epssScore}</p>
+                            <p><span class="font-medium">Vulnerable Products:</span> ${result.vulnerableProducts}</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mb-4">
+                    <h3 class="font-semibold text-gray-700 mb-2">References</h3>
+                    <div class="space-y-1">
+                        ${result.references.slice(0, 5).map(ref => `
+                            <p class="text-blue-600 hover:underline">
+                                <a href="${ref}" target="_blank" rel="noopener noreferrer">
+                                    <i class="fas fa-external-link-alt mr-1"></i>${ref.length > 60 ? ref.substring(0, 60) + '...' : ref}
+                                </a>
+                            </p>
+                        `).join('')}
+                        ${result.references.length > 5 ? `<p class="text-gray-500">+ ${result.references.length - 5} more references</p>` : ''}
+                    </div>
+                </div>
+                
+                <div>
+                    <h3 class="font-semibold text-gray-700 mb-2">Data Sources</h3>
+                    <div class="flex flex-wrap gap-2">
+                        ${Object.entries(result.sources).map(([sourceName, sourceData]) => `
+                            <span class="px-2 py-1 rounded text-xs ${sourceData.error ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}">
+                                ${sourceName} ${sourceData.error ? '(Failed)' : ''}
+                            </span>
+                        `).join('')}
+                    </div>
                 </div>
             `;
-
-            downloadButton.classList.remove('hidden');
+            
+            resultsDiv.appendChild(card);
         }
 
         searchButton.addEventListener('click', searchCVEs);
         downloadButton.addEventListener('click', downloadExcel);
+        clearButton.addEventListener('click', clearResults);
+        
         cveInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
+            if (e.key === 'Enter' && e.ctrlKey) {
                 e.preventDefault();
                 searchCVEs();
             }
