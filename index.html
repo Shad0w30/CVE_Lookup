@@ -108,12 +108,6 @@
                 url: cveId => `https://cveawg.mitre.org/api/cve/${cveId}`,
                 parse: data => data || null,
                 error: null
-            },
-            VULNERS: {
-                name: "Vulners",
-                url: cveId => `https://vulners.com/api/v3/search/lucene/?query=cveId:${cveId}`,
-                parse: data => data.data?.search?.[0]?._source || null,
-                error: null
             }
         };
 
@@ -124,19 +118,17 @@
                 url: cveId => `https://api.first.org/data/v1/epss?cve=${cveId}`,
                 parse: data => data.data?.[0] || null,
                 error: null
-            },
-            CVE_DETAILS: {
-                name: "CVE Details",
-                url: cveId => `https://www.cvedetails.com/json-feed.php?cve_id=${cveId}`,
-                parse: data => data?.[0] || null,
-                error: null
             }
         };
 
         async function fetchWithRetry(url, maxRetries = 3, delay = 5000) {
             for (let attempt = 1; attempt <= maxRetries; attempt++) {
                 try {
-                    const response = await fetch(url);
+                    const response = await fetch(url, {
+                        headers: {
+                            'Accept': 'application/json'
+                        }
+                    });
                     if (response.status === 429) {
                         if (attempt === maxRetries) throw new Error('Rate limit exceeded');
                         await new Promise(resolve => setTimeout(resolve, delay));
@@ -199,19 +191,9 @@
                 return data.NVD.metrics.cvssMetricV30[0].cvssData.baseScore;
             }
             
-            // Try Vulners
-            if (data.VULNERS?.cvss?.score) {
-                return data.VULNERS.cvss.score;
-            }
-            
             // Try CIRCL
             if (data.CIRCL?.cvss) {
                 return data.CIRCL.cvss;
-            }
-            
-            // Try CVE Details
-            if (data.CVE_DETAILS?.cvss_score) {
-                return data.CVE_DETAILS.cvss_score;
             }
             
             return 'N/A';
@@ -226,15 +208,6 @@
                 return data.NVD.metrics.cvssMetricV30[0].cvssData.baseSeverity;
             }
             
-            // Try Vulners
-            if (data.VULNERS?.cvss?.score) {
-                const score = parseFloat(data.VULNERS.cvss.score);
-                if (score >= 9.0) return 'CRITICAL';
-                if (score >= 7.0) return 'HIGH';
-                if (score >= 4.0) return 'MEDIUM';
-                return 'LOW';
-            }
-            
             // Try CIRCL
             if (data.CIRCL?.cvss) {
                 const score = parseFloat(data.CIRCL.cvss);
@@ -242,11 +215,6 @@
                 if (score >= 7.0) return 'HIGH';
                 if (score >= 4.0) return 'MEDIUM';
                 return 'LOW';
-            }
-            
-            // Try CVE Details
-            if (data.CVE_DETAILS?.cvss_severity) {
-                return data.CVE_DETAILS.cvss_severity.toUpperCase();
             }
             
             return 'N/A';
@@ -260,15 +228,9 @@
             if (data.CIRCL?.summary) {
                 return data.CIRCL.summary;
             }
-            if (data.VULNERS?.description) {
-                return data.VULNERS.description;
-            }
             if (data.MITRE?.descriptions) {
                 const enDesc = data.MITRE.descriptions.find(d => d.lang === 'en');
                 if (enDesc) return enDesc.value;
-            }
-            if (data.CVE_DETAILS?.summary) {
-                return data.CVE_DETAILS.summary;
             }
             return 'No description available';
         }
@@ -298,16 +260,6 @@
                         return parts[3];
                     }
                 }
-            }
-            
-            // Try from Vulners
-            if (data.VULNERS?.affectedProducts) {
-                return data.VULNERS.affectedProducts[0] || 'N/A';
-            }
-            
-            // Try from CVE Details
-            if (data.CVE_DETAILS?.product_name) {
-                return data.CVE_DETAILS.product_name;
             }
             
             // Try to extract from description as fallback
@@ -351,18 +303,6 @@
                 for (const ref of data.MITRE.references) {
                     if (ref.url) references.add(ref.url);
                 }
-            }
-            
-            // From Vulners
-            if (data.VULNERS?.references) {
-                for (const ref of data.VULNERS.references) {
-                    references.add(ref);
-                }
-            }
-            
-            // From CVE Details
-            if (data.CVE_DETAILS?.url) {
-                references.add(data.CVE_DETAILS.url);
             }
             
             return Array.from(references);
@@ -557,7 +497,7 @@
                     const vulnerablePackage = getMainVulnerablePackage(sourcesData);
                     const epssScore = getEPSSScore(sourcesData);
                     const references = getReferences(sourcesData);
-                    const publishedDate = formatDate(sourcesData.NVD?.published || sourcesData.CIRCL?.Published || sourcesData.VULNERS?.published);
+                    const publishedDate = formatDate(sourcesData.NVD?.published || sourcesData.CIRCL?.Published || sourcesData.MITRE?.datePublished);
                     
                     const result = {
                         cveId,
