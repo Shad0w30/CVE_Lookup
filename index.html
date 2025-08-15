@@ -7,15 +7,41 @@
     <link href="https://unpkg.com/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .tooltip {
+            position: relative;
+            display: inline-block;
+        }
+        .tooltip .tooltiptext {
+            visibility: hidden;
+            width: 200px;
+            background-color: #555;
+            color: #fff;
+            text-align: center;
+            border-radius: 6px;
+            padding: 5px;
+            position: absolute;
+            z-index: 1;
+            bottom: 125%;
+            left: 50%;
+            margin-left: -100px;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .tooltip:hover .tooltiptext {
+            visibility: visible;
+            opacity: 1;
+        }
+    </style>
 </head>
 <body class="bg-gray-100 min-h-screen">
     <div class="container mx-auto p-4 max-w-6xl">
         <h1 class="text-3xl font-bold text-center mb-6">CVE Lookup</h1>
         <div class="bg-white p-6 rounded-lg shadow-md mb-6">
             <div class="mb-4">
-                <label for="cveInput" class="block text-lg font-medium text-gray-700">Enter CVE IDs (comma-separated or on new lines, e.g., CVE-2021-44228, CVE-2020-12345):</label>
+                <label for="cveInput" class="block text-lg font-medium text-gray-700">Enter CVE IDs (comma-separated or on new lines):</label>
                 <textarea id="cveInput" rows="5" class="mt-2 w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="CVE-2021-44228, CVE-2020-12345\nCVE-2019-0708"></textarea>
-                <p class="mt-2 text-sm text-gray-500">Enter CVE IDs separated by commas, new lines, or both. Only IDs starting with 'CVE-' are processed.</p>
+                <p class="mt-2 text-sm text-gray-500">Enter CVE IDs separated by commas, new lines, or both.</p>
             </div>
             <div class="flex flex-wrap gap-4">
                 <button id="searchButton" class="flex-1 bg-blue-500 text-white p-3 rounded-lg hover:bg-blue-600 transition">
@@ -29,7 +55,7 @@
                 </button>
             </div>
             <div id="loading" class="hidden mt-4 text-center text-gray-600">
-                <i class="fas fa-spinner fa-spin mr-2"></i>Loading CVE data...
+                <i class="fas fa-spinner fa-spin mr-2"></i>Loading CVE data from multiple sources...
             </div>
             <div id="error" class="hidden mt-4 p-4 text-center text-red-600 bg-red-100 rounded-lg"></div>
         </div>
@@ -69,12 +95,14 @@
             NVD: {
                 name: "National Vulnerability Database",
                 url: cveId => `https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=${cveId}`,
-                parse: data => data.vulnerabilities?.[0]?.cve || null
+                parse: data => data.vulnerabilities?.[0]?.cve || null,
+                error: null
             },
             CIRCL: {
                 name: "CIRCL Luxembourg",
                 url: cveId => `https://cve.circl.lu/api/cve/${cveId}`,
-                parse: data => data || null
+                parse: data => data || null,
+                error: null
             }
         };
 
@@ -83,7 +111,8 @@
             EPSS: {
                 name: "Exploit Prediction Scoring System (EPSS)",
                 url: cveId => `https://api.first.org/data/v1/epss?cve=${cveId}`,
-                parse: data => data.data?.[0] || null
+                parse: data => data.data?.[0] || null,
+                error: null
             }
         };
 
@@ -114,9 +143,11 @@
                     const data = await fetchWithRetry(source.url(cveId));
                     results[sourceName] = source.parse(data);
                     if (!results[sourceName]) throw new Error('No data returned');
+                    source.error = null;
                 } catch (error) {
                     console.error(`Error fetching ${sourceName} data for ${cveId}:`, error);
-                    results[sourceName] = { error: `Failed to fetch from ${sourceName}` };
+                    results[sourceName] = { error: error.message };
+                    source.error = error.message;
                 }
             }
             
@@ -126,9 +157,11 @@
                     const data = await fetchWithRetry(source.url(cveId));
                     results[sourceName] = source.parse(data);
                     if (!results[sourceName]) throw new Error('No data returned');
+                    source.error = null;
                 } catch (error) {
                     console.error(`Error fetching ${sourceName} data for ${cveId}:`, error);
-                    results[sourceName] = { error: `Failed to fetch from ${sourceName}` };
+                    results[sourceName] = { error: error.message };
+                    source.error = error.message;
                 }
             }
             
@@ -181,18 +214,16 @@
             return 'No description available';
         }
 
-        function getVulnerablePackage(data) {
-            const packages = new Set();
-            
-            // From NVD
+        function getMainVulnerablePackage(data) {
+            // Try to extract the main vulnerable package from CPEs
             if (data.NVD?.configurations) {
                 for (const config of data.NVD.configurations) {
                     for (const node of config.nodes) {
                         for (const cpe of node.cpeMatch || []) {
                             if (cpe.criteria) {
                                 const parts = cpe.criteria.split(':');
-                                if (parts[3] && parts[4]) {
-                                    packages.add(`${parts[3]}:${parts[4]}`);
+                                if (parts[3] && parts[3] !== '*') {
+                                    return parts[3]; // Return the product name
                                 }
                             }
                         }
@@ -200,17 +231,26 @@
                 }
             }
             
-            // From CIRCL
+            // Try from CIRCL
             if (data.CIRCL?.vulnerable_configuration) {
                 for (const config of data.CIRCL.vulnerable_configuration) {
                     const parts = config.split(':');
-                    if (parts[3] && parts[4]) {
-                        packages.add(`${parts[3]}:${parts[4]}`);
+                    if (parts[3] && parts[3] !== '*') {
+                        return parts[3];
                     }
                 }
             }
             
-            return Array.from(packages).join(', ') || 'N/A';
+            // Try to extract from description as fallback
+            const description = getDescription(data).toLowerCase();
+            const commonPackages = ['log4j', 'openssl', 'libxml', 'pam', 'nginx', 'apache', 'linux kernel', 'windows', 'wordpress'];
+            for (const pkg of commonPackages) {
+                if (description.includes(pkg)) {
+                    return pkg.charAt(0).toUpperCase() + pkg.slice(1);
+                }
+            }
+            
+            return 'N/A';
         }
 
         function getFixStatus(data) {
@@ -293,16 +333,22 @@
             }
         }
 
+        function getSeverityColor(severity) {
+            switch(severity) {
+                case 'CRITICAL': return 'bg-red-800 text-white';
+                case 'HIGH': return 'bg-red-600 text-white';
+                case 'MEDIUM': return 'bg-amber-500 text-white';
+                case 'LOW': return 'bg-green-500 text-white';
+                default: return 'bg-gray-100 text-gray-800';
+            }
+        }
+
         function renderTableRow(result, index) {
             const row = document.createElement('tr');
             row.className = 'hover:bg-gray-50 cursor-pointer';
             row.onclick = () => toggleRowDetails(index);
             
-            let severityColor = 'gray';
-            if (result.severity === 'CRITICAL') severityColor = 'red';
-            else if (result.severity === 'HIGH') severityColor = 'orange';
-            else if (result.severity === 'MEDIUM') severityColor = 'yellow';
-            else if (result.severity === 'LOW') severityColor = 'green';
+            const severityColor = getSeverityColor(result.severity);
             
             row.innerHTML = `
                 <td class="px-6 py-4 whitespace-nowrap">
@@ -312,12 +358,11 @@
                         </div>
                         <div class="ml-4">
                             <div class="text-sm font-medium text-gray-900">${result.cveId}</div>
-                            <div class="text-sm text-gray-500">${result.publishedDate}</div>
                         </div>
                     </div>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap">
-                    <div class="text-sm text-gray-900">${result.vulnerablePackage}</div>
+                    <div class="text-sm text-gray-900 font-medium">${result.vulnerablePackage}</div>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap">
                     <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${result.fixStatus === 'Yes' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
@@ -328,7 +373,7 @@
                     ${result.epssScore}
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap">
-                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-${severityColor}-100 text-${severityColor}-800">
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${severityColor}">
                         ${result.cvssScore} (${result.severity})
                     </span>
                 </td>
@@ -337,6 +382,18 @@
             const detailsRow = document.createElement('tr');
             detailsRow.id = `details-${index}`;
             detailsRow.className = 'hidden bg-gray-50';
+            
+            // Prepare data sources status
+            const allSources = {...CVE_SOURCES, ...ADDITIONAL_SOURCES};
+            const sourcesStatus = Object.entries(allSources).map(([name, source]) => {
+                const isError = source.error !== null;
+                return {
+                    name,
+                    isError,
+                    error: source.error
+                };
+            });
+            
             detailsRow.innerHTML = `
                 <td colspan="5" class="px-6 py-4">
                     <div class="space-y-4">
@@ -344,25 +401,32 @@
                             <h3 class="font-semibold text-gray-700">Description</h3>
                             <p class="text-gray-800 mt-1">${result.description}</p>
                         </div>
-                        <div>
-                            <h3 class="font-semibold text-gray-700">References</h3>
-                            <div class="mt-1 space-y-1">
-                                ${result.references.slice(0, 3).map(ref => `
-                                    <p class="text-blue-600 hover:underline">
-                                        <a href="${ref}" target="_blank" rel="noopener noreferrer">
-                                            <i class="fas fa-external-link-alt mr-1"></i>${ref.length > 80 ? ref.substring(0, 80) + '...' : ref}
-                                        </a>
-                                    </p>
-                                `).join('')}
-                                ${result.references.length > 3 ? `<p class="text-gray-500">+ ${result.references.length - 3} more references</p>` : ''}
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <h3 class="font-semibold text-gray-700">Published Date</h3>
+                                <p class="text-gray-800 mt-1">${result.publishedDate}</p>
+                            </div>
+                            <div>
+                                <h3 class="font-semibold text-gray-700">References</h3>
+                                <div class="mt-1 space-y-1">
+                                    ${result.references.slice(0, 3).map(ref => `
+                                        <p class="text-blue-600 hover:underline">
+                                            <a href="${ref}" target="_blank" rel="noopener noreferrer">
+                                                <i class="fas fa-external-link-alt mr-1"></i>${ref.length > 80 ? ref.substring(0, 80) + '...' : ref}
+                                            </a>
+                                        </p>
+                                    `).join('')}
+                                    ${result.references.length > 3 ? `<p class="text-gray-500">+ ${result.references.length - 3} more references</p>` : ''}
+                                </div>
                             </div>
                         </div>
                         <div>
                             <h3 class="font-semibold text-gray-700">Data Sources</h3>
                             <div class="mt-1 flex flex-wrap gap-2">
-                                ${Object.entries(result.sources).map(([sourceName, sourceData]) => `
-                                    <span class="px-2 py-1 rounded text-xs ${sourceData.error ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}">
-                                        ${sourceName} ${sourceData.error ? '(Failed)' : ''}
+                                ${sourcesStatus.map(source => `
+                                    <span class="px-2 py-1 rounded text-xs ${source.isError ? 'bg-red-100 text-red-800 tooltip' : 'bg-green-100 text-green-800'}">
+                                        ${source.name} ${source.isError ? '(Failed)' : ''}
+                                        ${source.isError ? `<span class="tooltiptext">${source.error}</span>` : ''}
                                     </span>
                                 `).join('')}
                             </div>
@@ -400,7 +464,7 @@
                     const cvssScore = getCVSSScore(sourcesData);
                     const severity = getSeverity(sourcesData);
                     const description = getDescription(sourcesData);
-                    const vulnerablePackage = getVulnerablePackage(sourcesData);
+                    const vulnerablePackage = getMainVulnerablePackage(sourcesData);
                     const fixStatus = getFixStatus(sourcesData);
                     const references = getReferences(sourcesData);
                     const publishedDate = formatDate(sourcesData.NVD?.published || sourcesData.CIRCL?.Published);
