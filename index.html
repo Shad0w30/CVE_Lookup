@@ -39,9 +39,9 @@
         <h1 class="text-3xl font-bold text-center mb-6">CVE Lookup</h1>
         <div class="bg-white p-6 rounded-lg shadow-md mb-6">
             <div class="mb-4">
-                <label for="cveInput" class="block text-lg font-medium text-gray-700">Enter CVE IDs (comma-separated or on new lines):</label>
+                <label for="cveInput" class="block text-lg font-medium text-gray-700">Enter CVE IDs (comma-separated or on new lines, e.g., CVE-2021-44228, CVE-2020-12345):</label>
                 <textarea id="cveInput" rows="5" class="mt-2 w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="CVE-2021-44228, CVE-2020-12345\nCVE-2019-0708"></textarea>
-                <p class="mt-2 text-sm text-gray-500">Enter CVE IDs separated by commas, new lines, or both.</p>
+                <p class="mt-2 text-sm text-gray-500">Enter CVE IDs separated by commas, new lines, or both. Only IDs starting with 'CVE-' are processed.</p>
             </div>
             <div class="flex flex-wrap gap-4">
                 <button id="searchButton" class="flex-1 bg-blue-500 text-white p-3 rounded-lg hover:bg-blue-600 transition">
@@ -67,7 +67,6 @@
                         <tr>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">CVE ID</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vulnerable Package</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fix Available</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">EPSS Score</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">CVSS Score</th>
                         </tr>
@@ -103,6 +102,18 @@
                 url: cveId => `https://cve.circl.lu/api/cve/${cveId}`,
                 parse: data => data || null,
                 error: null
+            },
+            MITRE: {
+                name: "MITRE CVE Database",
+                url: cveId => `https://cveawg.mitre.org/api/cve/${cveId}`,
+                parse: data => data || null,
+                error: null
+            },
+            VULNERS: {
+                name: "Vulners",
+                url: cveId => `https://vulners.com/api/v3/search/lucene/?query=cveId:${cveId}`,
+                parse: data => data.data?.search?.[0]?._source || null,
+                error: null
             }
         };
 
@@ -112,6 +123,12 @@
                 name: "Exploit Prediction Scoring System (EPSS)",
                 url: cveId => `https://api.first.org/data/v1/epss?cve=${cveId}`,
                 parse: data => data.data?.[0] || null,
+                error: null
+            },
+            CVE_DETAILS: {
+                name: "CVE Details",
+                url: cveId => `https://www.cvedetails.com/json-feed.php?cve_id=${cveId}`,
+                parse: data => data?.[0] || null,
                 error: null
             }
         };
@@ -174,25 +191,51 @@
         }
 
         function getCVSSScore(data) {
+            // Try NVD first
             if (data.NVD?.metrics?.cvssMetricV31?.[0]?.cvssData?.baseScore) {
                 return data.NVD.metrics.cvssMetricV31[0].cvssData.baseScore;
             }
             if (data.NVD?.metrics?.cvssMetricV30?.[0]?.cvssData?.baseScore) {
                 return data.NVD.metrics.cvssMetricV30[0].cvssData.baseScore;
             }
+            
+            // Try Vulners
+            if (data.VULNERS?.cvss?.score) {
+                return data.VULNERS.cvss.score;
+            }
+            
+            // Try CIRCL
             if (data.CIRCL?.cvss) {
                 return data.CIRCL.cvss;
             }
+            
+            // Try CVE Details
+            if (data.CVE_DETAILS?.cvss_score) {
+                return data.CVE_DETAILS.cvss_score;
+            }
+            
             return 'N/A';
         }
 
         function getSeverity(data) {
+            // Try NVD first
             if (data.NVD?.metrics?.cvssMetricV31?.[0]?.cvssData?.baseSeverity) {
                 return data.NVD.metrics.cvssMetricV31[0].cvssData.baseSeverity;
             }
             if (data.NVD?.metrics?.cvssMetricV30?.[0]?.cvssData?.baseSeverity) {
                 return data.NVD.metrics.cvssMetricV30[0].cvssData.baseSeverity;
             }
+            
+            // Try Vulners
+            if (data.VULNERS?.cvss?.score) {
+                const score = parseFloat(data.VULNERS.cvss.score);
+                if (score >= 9.0) return 'CRITICAL';
+                if (score >= 7.0) return 'HIGH';
+                if (score >= 4.0) return 'MEDIUM';
+                return 'LOW';
+            }
+            
+            // Try CIRCL
             if (data.CIRCL?.cvss) {
                 const score = parseFloat(data.CIRCL.cvss);
                 if (score >= 9.0) return 'CRITICAL';
@@ -200,6 +243,12 @@
                 if (score >= 4.0) return 'MEDIUM';
                 return 'LOW';
             }
+            
+            // Try CVE Details
+            if (data.CVE_DETAILS?.cvss_severity) {
+                return data.CVE_DETAILS.cvss_severity.toUpperCase();
+            }
+            
             return 'N/A';
         }
 
@@ -210,6 +259,16 @@
             }
             if (data.CIRCL?.summary) {
                 return data.CIRCL.summary;
+            }
+            if (data.VULNERS?.description) {
+                return data.VULNERS.description;
+            }
+            if (data.MITRE?.descriptions) {
+                const enDesc = data.MITRE.descriptions.find(d => d.lang === 'en');
+                if (enDesc) return enDesc.value;
+            }
+            if (data.CVE_DETAILS?.summary) {
+                return data.CVE_DETAILS.summary;
             }
             return 'No description available';
         }
@@ -241,6 +300,16 @@
                 }
             }
             
+            // Try from Vulners
+            if (data.VULNERS?.affectedProducts) {
+                return data.VULNERS.affectedProducts[0] || 'N/A';
+            }
+            
+            // Try from CVE Details
+            if (data.CVE_DETAILS?.product_name) {
+                return data.CVE_DETAILS.product_name;
+            }
+            
             // Try to extract from description as fallback
             const description = getDescription(data).toLowerCase();
             const commonPackages = ['log4j', 'openssl', 'libxml', 'pam', 'nginx', 'apache', 'linux kernel', 'windows', 'wordpress'];
@@ -253,15 +322,11 @@
             return 'N/A';
         }
 
-        function getFixStatus(data) {
-            if (data.NVD?.descriptions) {
-                const enDesc = data.NVD.descriptions.find(d => d.lang === 'en');
-                if (enDesc?.value.toLowerCase().includes('fixed')) return 'Yes';
+        function getEPSSScore(data) {
+            if (data.EPSS?.epss) {
+                return (data.EPSS.epss * 100).toFixed(2) + '%';
             }
-            if (data.CIRCL?.summary?.toLowerCase().includes('fixed')) {
-                return 'Yes';
-            }
-            return 'No';
+            return 'N/A';
         }
 
         function getReferences(data) {
@@ -281,6 +346,25 @@
                 }
             }
             
+            // From MITRE
+            if (data.MITRE?.references) {
+                for (const ref of data.MITRE.references) {
+                    if (ref.url) references.add(ref.url);
+                }
+            }
+            
+            // From Vulners
+            if (data.VULNERS?.references) {
+                for (const ref of data.VULNERS.references) {
+                    references.add(ref);
+                }
+            }
+            
+            // From CVE Details
+            if (data.CVE_DETAILS?.url) {
+                references.add(data.CVE_DETAILS.url);
+            }
+            
             return Array.from(references);
         }
 
@@ -296,7 +380,6 @@
             const worksheetData = cveResults.map(result => ({
                 'CVE ID': result.cveId,
                 'Vulnerable Package': result.vulnerablePackage,
-                'Fix Available': result.fixStatus,
                 'EPSS Score': result.epssScore,
                 'CVSS Score': result.cvssScore,
                 'Severity': result.severity,
@@ -343,12 +426,22 @@
             }
         }
 
+        function getEPSSColor(epssScore) {
+            if (epssScore === 'N/A') return 'bg-gray-100 text-gray-800';
+            const score = parseFloat(epssScore);
+            if (score >= 90) return 'bg-red-600 text-white';
+            if (score >= 70) return 'bg-orange-500 text-white';
+            if (score >= 30) return 'bg-yellow-400 text-gray-800';
+            return 'bg-green-500 text-white';
+        }
+
         function renderTableRow(result, index) {
             const row = document.createElement('tr');
             row.className = 'hover:bg-gray-50 cursor-pointer';
             row.onclick = () => toggleRowDetails(index);
             
             const severityColor = getSeverityColor(result.severity);
+            const epssColor = getEPSSColor(result.epssScore.replace('%', ''));
             
             row.innerHTML = `
                 <td class="px-6 py-4 whitespace-nowrap">
@@ -365,12 +458,9 @@
                     <div class="text-sm text-gray-900 font-medium">${result.vulnerablePackage}</div>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap">
-                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${result.fixStatus === 'Yes' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
-                        ${result.fixStatus}
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${epssColor}">
+                        ${result.epssScore}
                     </span>
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    ${result.epssScore}
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap">
                     <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${severityColor}">
@@ -395,7 +485,7 @@
             });
             
             detailsRow.innerHTML = `
-                <td colspan="5" class="px-6 py-4">
+                <td colspan="4" class="px-6 py-4">
                     <div class="space-y-4">
                         <div>
                             <h3 class="font-semibold text-gray-700">Description</h3>
@@ -465,10 +555,9 @@
                     const severity = getSeverity(sourcesData);
                     const description = getDescription(sourcesData);
                     const vulnerablePackage = getMainVulnerablePackage(sourcesData);
-                    const fixStatus = getFixStatus(sourcesData);
+                    const epssScore = getEPSSScore(sourcesData);
                     const references = getReferences(sourcesData);
-                    const publishedDate = formatDate(sourcesData.NVD?.published || sourcesData.CIRCL?.Published);
-                    const epssScore = sourcesData.EPSS?.epss ? (sourcesData.EPSS.epss * 100).toFixed(2) + '%' : 'N/A';
+                    const publishedDate = formatDate(sourcesData.NVD?.published || sourcesData.CIRCL?.Published || sourcesData.VULNERS?.published);
                     
                     const result = {
                         cveId,
@@ -477,7 +566,6 @@
                         epssScore,
                         publishedDate,
                         vulnerablePackage,
-                        fixStatus,
                         description,
                         references,
                         sources: sourcesData
@@ -498,7 +586,6 @@
                         epssScore: 'N/A',
                         publishedDate: 'N/A',
                         vulnerablePackage: 'N/A',
-                        fixStatus: 'N/A',
                         description: 'Failed to fetch data',
                         references: [],
                         sources: {}
