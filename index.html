@@ -117,7 +117,11 @@
                 url: cveId => null, // We won't actually fetch this due to CORS
                 parse: data => null,
                 error: "- visit site directly",
-                directUrl: cveId => `https://www.wiz.io/vulnerability-database/cve/${cveId}`
+                directUrl: cveId => {
+                    // Convert CVE-YYYY-NNNN to cve-yyyy-nnnn for Wiz URL
+                    const lowerCaseCve = cveId.toLowerCase();
+                    return `https://www.wiz.io/vulnerability-database/${lowerCaseCve}`;
+                }
             }
         };
 
