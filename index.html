@@ -89,6 +89,13 @@
         const resultsTable = document.getElementById('resultsTable');
         let cveResults = [];
 
+        // List of proxy servers to use (fallback if one fails)
+        const PROXY_SERVERS = [
+            'https://api.allorigins.win/raw?url=',
+            'https://corsproxy.io/?',
+            'https://cors-anywhere.herokuapp.com/'
+        ];
+
         // List of CVE data sources with their APIs
         const CVE_SOURCES = {
             NVD: {
@@ -111,7 +118,7 @@
             },
             WIZ: {
                 name: "Wiz Vulnerability Database",
-                url: cveId => `https://www.wiz.io/vulnerability-database/cve/${cveId}`,
+                url: cveId => `${PROXY_SERVERS[0]}https://www.wiz.io/vulnerability-database/cve/${cveId}`,
                 parse: data => data || null,
                 error: null
             }
@@ -128,22 +135,50 @@
         };
 
         async function fetchWithRetry(url, maxRetries = 3, delay = 5000) {
+            let lastError = null;
+            
             for (let attempt = 1; attempt <= maxRetries; attempt++) {
                 try {
-                    const response = await fetch(url, {
-                        headers: {
-                            'Accept': 'application/json'
-                        }
-                    });
+                    const headers = {
+                        'Accept': 'application/json'
+                    };
+                    
+                    const response = await fetch(url, { headers });
+                    
                     if (response.status === 429) {
                         if (attempt === maxRetries) throw new Error('Rate limit exceeded');
                         await new Promise(resolve => setTimeout(resolve, delay));
                         continue;
                     }
+                    
                     if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
                     return await response.json();
                 } catch (error) {
-                    if (attempt === maxRetries) throw error;
+                    lastError = error;
+                    
+                    // If this is a WIZ request and we have fallback proxies, try the next one
+                    if (url.includes('wiz.io') && attempt === 1) {
+                        for (let i = 1; i < PROXY_SERVERS.length; i++) {
+                            try {
+                                const proxyUrl = PROXY_SERVERS[i];
+                                let newUrl;
+                                
+                                // Handle different proxy URL formats
+                                if (proxyUrl.includes('corsproxy.io')) {
+                                    newUrl = `${proxyUrl}${encodeURIComponent(`https://www.wiz.io/vulnerability-database/cve/${url.split('/').pop()}`)}`;
+                                } else {
+                                    newUrl = url.replace(PROXY_SERVERS[0], proxyUrl);
+                                }
+                                
+                                const response = await fetch(newUrl, { headers: { 'Accept': 'application/json' } });
+                                if (response.ok) return await response.json();
+                            } catch (e) {
+                                console.log(`Proxy ${PROXY_SERVERS[i]} failed, trying next...`);
+                            }
+                        }
+                    }
+                    
+                    if (attempt === maxRetries) throw lastError;
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
             }
