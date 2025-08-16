@@ -102,7 +102,7 @@
                 name: "CIRCL Luxembourg",
                 url: cveId => null, // We won't actually fetch this due to CORS
                 parse: data => null,
-                error: "CORS blocked - visit site directly",
+                error: "visit site directly",
                 directUrl: cveId => `https://cve.circl.lu/cve/${cveId}`
             },
             MITRE: {
@@ -116,7 +116,7 @@
                 name: "Wiz Vulnerability Database",
                 url: cveId => null, // We won't actually fetch this due to CORS
                 parse: data => null,
-                error: "CORS blocked - visit site directly",
+                error: "- visit site directly",
                 directUrl: cveId => `https://www.wiz.io/vulnerability-database/cve/${cveId}`
             }
         };
@@ -447,7 +447,7 @@
                                 ${sourcesStatus.map(source => `
                                     <span class="px-2 py-1 rounded text-xs ${source.isError ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}">
                                         <a href="${source.directUrl}" target="_blank" rel="noopener noreferrer" class="hover:underline">
-                                            ${source.name} ${source.isError ? '(Visit directly)' : ''}
+                                            ${source.name} ${source.isError ? '(<-)' : ''}
                                         </a>
                                         ${source.isError ? `<span class="tooltiptext">${source.error}</span>` : ''}
                                     </span>
