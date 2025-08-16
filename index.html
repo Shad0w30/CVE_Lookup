@@ -341,7 +341,7 @@
         }
 
         function getWizDetails(data) {
-            if (!data.WIZ) return null;
+            if (!data.WIZ || data.WIZ.error || typeof data.WIZ !== 'object') return null;
             
             return {
                 hasPublicExploit: data.WIZ.hasPublicExploit ? 'Yes' : 'No',
@@ -515,6 +515,7 @@
             });
 
             const wizDetails = getWizDetails(result.sources);
+            const hasWizData = wizDetails !== null;
             
             detailsRow.innerHTML = `
                 <td colspan="4" class="px-6 py-4">
@@ -524,7 +525,7 @@
                             <p class="text-gray-800 mt-1">${result.description}</p>
                         </div>
                         
-                        ${wizDetails ? `
+                        ${hasWizData ? `
                         <div class="bg-blue-50 p-4 rounded-lg">
                             <h3 class="font-semibold text-gray-700 mb-2">Wiz Vulnerability Details</h3>
                             <div class="grid grid-cols-2 gap-4">
