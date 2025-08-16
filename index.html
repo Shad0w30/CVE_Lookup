@@ -108,6 +108,12 @@
                 url: cveId => `https://cveawg.mitre.org/api/cve/${cveId}`,
                 parse: data => data || null,
                 error: null
+            },
+            WIZ: {
+                name: "Wiz Vulnerability Database",
+                url: cveId => `https://www.wiz.io/api/vulnerability-database/cve/${cveId}`,
+                parse: data => data || null,
+                error: null
             }
         };
 
@@ -191,6 +197,11 @@
                 return data.NVD.metrics.cvssMetricV30[0].cvssData.baseScore;
             }
             
+            // Try Wiz
+            if (data.WIZ?.cvssScore) {
+                return data.WIZ.cvssScore;
+            }
+            
             // Try CIRCL
             if (data.CIRCL?.cvss) {
                 return data.CIRCL.cvss;
@@ -206,6 +217,11 @@
             }
             if (data.NVD?.metrics?.cvssMetricV30?.[0]?.cvssData?.baseSeverity) {
                 return data.NVD.metrics.cvssMetricV30[0].cvssData.baseSeverity;
+            }
+            
+            // Try Wiz
+            if (data.WIZ?.severity) {
+                return data.WIZ.severity.toUpperCase();
             }
             
             // Try CIRCL
@@ -231,6 +247,9 @@
             if (data.MITRE?.descriptions) {
                 const enDesc = data.MITRE.descriptions.find(d => d.lang === 'en');
                 if (enDesc) return enDesc.value;
+            }
+            if (data.WIZ?.description) {
+                return data.WIZ.description;
             }
             return 'No description available';
         }
@@ -260,6 +279,11 @@
                         return parts[3];
                     }
                 }
+            }
+            
+            // Try from Wiz
+            if (data.WIZ?.affectedSoftware) {
+                return data.WIZ.affectedSoftware[0]?.name || 'N/A';
             }
             
             // Try to extract from description as fallback
@@ -302,6 +326,13 @@
             if (data.MITRE?.references) {
                 for (const ref of data.MITRE.references) {
                     if (ref.url) references.add(ref.url);
+                }
+            }
+            
+            // From Wiz
+            if (data.WIZ?.references) {
+                for (const ref of data.WIZ.references) {
+                    references.add(ref.url);
                 }
             }
             
@@ -497,7 +528,7 @@
                     const vulnerablePackage = getMainVulnerablePackage(sourcesData);
                     const epssScore = getEPSSScore(sourcesData);
                     const references = getReferences(sourcesData);
-                    const publishedDate = formatDate(sourcesData.NVD?.published || sourcesData.CIRCL?.Published || sourcesData.MITRE?.datePublished);
+                    const publishedDate = formatDate(sourcesData.NVD?.published || sourcesData.CIRCL?.Published || sourcesData.MITRE?.datePublished || sourcesData.WIZ?.publishedDate);
                     
                     const result = {
                         cveId,
