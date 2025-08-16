@@ -89,38 +89,35 @@
         const resultsTable = document.getElementById('resultsTable');
         let cveResults = [];
 
-        // List of proxy servers to use (fallback if one fails)
-        const PROXY_SERVERS = [
-            'https://api.allorigins.win/raw?url=',
-            'https://corsproxy.io/?',
-            'https://cors-anywhere.herokuapp.com/'
-        ];
-
         // List of CVE data sources with their APIs
         const CVE_SOURCES = {
             NVD: {
                 name: "National Vulnerability Database",
                 url: cveId => `https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=${cveId}`,
                 parse: data => data.vulnerabilities?.[0]?.cve || null,
-                error: null
+                error: null,
+                directUrl: cveId => `https://nvd.nist.gov/vuln/detail/${cveId}`
             },
             CIRCL: {
                 name: "CIRCL Luxembourg",
-                url: cveId => `https://cve.circl.lu/api/cve/${cveId}`,
-                parse: data => data || null,
-                error: null
+                url: cveId => null, // We won't actually fetch this due to CORS
+                parse: data => null,
+                error: "CORS blocked - visit site directly",
+                directUrl: cveId => `https://cve.circl.lu/cve/${cveId}`
             },
             MITRE: {
                 name: "MITRE CVE Database",
                 url: cveId => `https://cveawg.mitre.org/api/cve/${cveId}`,
                 parse: data => data || null,
-                error: null
+                error: null,
+                directUrl: cveId => `https://cve.mitre.org/cgi-bin/cvename.cgi?name=${cveId}`
             },
             WIZ: {
                 name: "Wiz Vulnerability Database",
-                url: cveId => `${PROXY_SERVERS[0]}https://www.wiz.io/vulnerability-database/cve/${cveId}`,
-                parse: data => data || null,
-                error: null
+                url: cveId => null, // We won't actually fetch this due to CORS
+                parse: data => null,
+                error: "CORS blocked - visit site directly",
+                directUrl: cveId => `https://www.wiz.io/vulnerability-database/cve/${cveId}`
             }
         };
 
@@ -130,55 +127,33 @@
                 name: "Exploit Prediction Scoring System (EPSS)",
                 url: cveId => `https://api.first.org/data/v1/epss?cve=${cveId}`,
                 parse: data => data.data?.[0] || null,
-                error: null
+                error: null,
+                directUrl: cveId => `https://www.first.org/epss/#!/search/${cveId}`
             }
         };
 
         async function fetchWithRetry(url, maxRetries = 3, delay = 5000) {
-            let lastError = null;
-            
+            // Skip fetching if URL is null (for CIRCL and WIZ)
+            if (url === null) {
+                throw new Error('Direct visit required due to CORS');
+            }
+
             for (let attempt = 1; attempt <= maxRetries; attempt++) {
                 try {
-                    const headers = {
-                        'Accept': 'application/json'
-                    };
-                    
-                    const response = await fetch(url, { headers });
-                    
+                    const response = await fetch(url, {
+                        headers: {
+                            'Accept': 'application/json'
+                        }
+                    });
                     if (response.status === 429) {
                         if (attempt === maxRetries) throw new Error('Rate limit exceeded');
                         await new Promise(resolve => setTimeout(resolve, delay));
                         continue;
                     }
-                    
                     if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
                     return await response.json();
                 } catch (error) {
-                    lastError = error;
-                    
-                    // If this is a WIZ request and we have fallback proxies, try the next one
-                    if (url.includes('wiz.io') && attempt === 1) {
-                        for (let i = 1; i < PROXY_SERVERS.length; i++) {
-                            try {
-                                const proxyUrl = PROXY_SERVERS[i];
-                                let newUrl;
-                                
-                                // Handle different proxy URL formats
-                                if (proxyUrl.includes('corsproxy.io')) {
-                                    newUrl = `${proxyUrl}${encodeURIComponent(`https://www.wiz.io/vulnerability-database/cve/${url.split('/').pop()}`)}`;
-                                } else {
-                                    newUrl = url.replace(PROXY_SERVERS[0], proxyUrl);
-                                }
-                                
-                                const response = await fetch(newUrl, { headers: { 'Accept': 'application/json' } });
-                                if (response.ok) return await response.json();
-                            } catch (e) {
-                                console.log(`Proxy ${PROXY_SERVERS[i]} failed, trying next...`);
-                            }
-                        }
-                    }
-                    
-                    if (attempt === maxRetries) throw lastError;
+                    if (attempt === maxRetries) throw error;
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
             }
@@ -190,6 +165,12 @@
             // Fetch from primary CVE sources
             for (const [sourceName, source] of Object.entries(CVE_SOURCES)) {
                 try {
+                    // Skip fetching for CIRCL and WIZ
+                    if (sourceName === 'CIRCL' || sourceName === 'WIZ') {
+                        results[sourceName] = { error: source.error };
+                        continue;
+                    }
+                    
                     const data = await fetchWithRetry(source.url(cveId));
                     results[sourceName] = source.parse(data);
                     if (!results[sourceName]) throw new Error('No data returned');
@@ -232,16 +213,6 @@
                 return data.NVD.metrics.cvssMetricV30[0].cvssData.baseScore;
             }
             
-            // Try Wiz
-            if (data.WIZ?.cvssScore) {
-                return data.WIZ.cvssScore;
-            }
-            
-            // Try CIRCL
-            if (data.CIRCL?.cvss) {
-                return data.CIRCL.cvss;
-            }
-            
             return 'N/A';
         }
 
@@ -254,20 +225,6 @@
                 return data.NVD.metrics.cvssMetricV30[0].cvssData.baseSeverity;
             }
             
-            // Try Wiz
-            if (data.WIZ?.severity) {
-                return data.WIZ.severity.toUpperCase();
-            }
-            
-            // Try CIRCL
-            if (data.CIRCL?.cvss) {
-                const score = parseFloat(data.CIRCL.cvss);
-                if (score >= 9.0) return 'CRITICAL';
-                if (score >= 7.0) return 'HIGH';
-                if (score >= 4.0) return 'MEDIUM';
-                return 'LOW';
-            }
-            
             return 'N/A';
         }
 
@@ -276,15 +233,9 @@
                 const enDesc = data.NVD.descriptions.find(d => d.lang === 'en');
                 if (enDesc) return enDesc.value;
             }
-            if (data.CIRCL?.summary) {
-                return data.CIRCL.summary;
-            }
             if (data.MITRE?.descriptions) {
                 const enDesc = data.MITRE.descriptions.find(d => d.lang === 'en');
                 if (enDesc) return enDesc.value;
-            }
-            if (data.WIZ?.description) {
-                return data.WIZ.description;
             }
             return 'No description available';
         }
@@ -306,21 +257,6 @@
                 }
             }
             
-            // Try from CIRCL
-            if (data.CIRCL?.vulnerable_configuration) {
-                for (const config of data.CIRCL.vulnerable_configuration) {
-                    const parts = config.split(':');
-                    if (parts[3] && parts[3] !== '*') {
-                        return parts[3];
-                    }
-                }
-            }
-            
-            // Try from Wiz
-            if (data.WIZ?.affectedSoftware) {
-                return data.WIZ.affectedSoftware[0]?.name || 'N/A';
-            }
-            
             // Try to extract from description as fallback
             const description = getDescription(data).toLowerCase();
             const commonPackages = ['log4j', 'openssl', 'libxml', 'pam', 'nginx', 'apache', 'linux kernel', 'windows', 'wordpress'];
@@ -340,22 +276,6 @@
             return 'N/A';
         }
 
-        function getWizDetails(data) {
-            if (!data.WIZ || data.WIZ.error || typeof data.WIZ !== 'object') return null;
-            
-            return {
-                hasPublicExploit: data.WIZ.hasPublicExploit ? 'Yes' : 'No',
-                hasCisaKevExploit: data.WIZ.hasCisaKevExploit ? 'Yes' : 'No',
-                cisaKevReleaseDate: data.WIZ.cisaKevReleaseDate || 'N/A',
-                cisaKevDueDate: data.WIZ.cisaKevDueDate || 'N/A',
-                epssPercentile: data.WIZ.epssPercentile ? (data.WIZ.epssPercentile * 100).toFixed(1) + '%' : 'N/A',
-                epssProbability: data.WIZ.epssProbability || 'N/A',
-                severity: data.WIZ.severity || 'N/A',
-                cnaScore: data.WIZ.cnaScore || 'N/A',
-                highProfile: data.WIZ.highProfile ? 'Yes' : 'No'
-            };
-        }
-
         function getReferences(data) {
             const references = new Set();
             
@@ -366,24 +286,10 @@
                 }
             }
             
-            // From CIRCL
-            if (data.CIRCL?.references) {
-                for (const ref of data.CIRCL.references) {
-                    references.add(ref);
-                }
-            }
-            
             // From MITRE
             if (data.MITRE?.references) {
                 for (const ref of data.MITRE.references) {
                     if (ref.url) references.add(ref.url);
-                }
-            }
-            
-            // From Wiz
-            if (data.WIZ?.references) {
-                for (const ref of data.WIZ.references) {
-                    references.add(ref.url);
                 }
             }
             
@@ -407,15 +313,7 @@
                 'Severity': result.severity,
                 'Published Date': result.publishedDate,
                 'Description': result.description,
-                'References': result.references.join('\n'),
-                'Has Public Exploit': result.wizDetails?.hasPublicExploit || 'N/A',
-                'Has CISA KEV Exploit': result.wizDetails?.hasCisaKevExploit || 'N/A',
-                'CISA KEV Release Date': result.wizDetails?.cisaKevReleaseDate || 'N/A',
-                'CISA KEV Due Date': result.wizDetails?.cisaKevDueDate || 'N/A',
-                'EPSS Percentile': result.wizDetails?.epssPercentile || 'N/A',
-                'EPSS Probability': result.wizDetails?.epssProbability || 'N/A',
-                'CNA Score': result.wizDetails?.cnaScore || 'N/A',
-                'High-profile Vulnerability': result.wizDetails?.highProfile || 'N/A'
+                'References': result.references.join('\n')
             }));
 
             const worksheet = XLSX.utils.json_to_sheet(worksheetData);
@@ -503,20 +401,19 @@
             detailsRow.id = `details-${index}`;
             detailsRow.className = 'hidden bg-gray-50';
             
-            // Prepare data sources status
+            // Prepare data sources status with direct links
             const allSources = {...CVE_SOURCES, ...ADDITIONAL_SOURCES};
             const sourcesStatus = Object.entries(allSources).map(([name, source]) => {
                 const isError = source.error !== null;
+                const directUrl = source.directUrl(result.cveId);
                 return {
                     name,
                     isError,
-                    error: source.error
+                    error: source.error,
+                    directUrl
                 };
             });
 
-            const wizDetails = getWizDetails(result.sources);
-            const hasWizData = wizDetails !== null;
-            
             detailsRow.innerHTML = `
                 <td colspan="4" class="px-6 py-4">
                     <div class="space-y-4">
@@ -524,27 +421,6 @@
                             <h3 class="font-semibold text-gray-700">Description</h3>
                             <p class="text-gray-800 mt-1">${result.description}</p>
                         </div>
-                        
-                        ${hasWizData ? `
-                        <div class="bg-blue-50 p-4 rounded-lg">
-                            <h3 class="font-semibold text-gray-700 mb-2">Wiz Vulnerability Details</h3>
-                            <div class="grid grid-cols-2 gap-4">
-                                <div>
-                                    <p><span class="font-medium">Has Public Exploit:</span> ${wizDetails.hasPublicExploit}</p>
-                                    <p><span class="font-medium">Has CISA KEV Exploit:</span> ${wizDetails.hasCisaKevExploit}</p>
-                                    <p><span class="font-medium">CISA KEV Release Date:</span> ${wizDetails.cisaKevReleaseDate}</p>
-                                    <p><span class="font-medium">CISA KEV Due Date:</span> ${wizDetails.cisaKevDueDate}</p>
-                                </div>
-                                <div>
-                                    <p><span class="font-medium">Exploitation Probability Percentile (EPSS):</span> ${wizDetails.epssPercentile}</p>
-                                    <p><span class="font-medium">Exploitation Probability (EPSS):</span> ${wizDetails.epssProbability}</p>
-                                    <p><span class="font-medium">Severity:</span> ${wizDetails.severity}</p>
-                                    <p><span class="font-medium">CNA Score:</span> ${wizDetails.cnaScore}</p>
-                                    <p><span class="font-medium">High-profile Vulnerability:</span> ${wizDetails.highProfile}</p>
-                                </div>
-                            </div>
-                        </div>
-                        ` : ''}
                         
                         <div class="grid grid-cols-2 gap-4">
                             <div>
@@ -569,8 +445,10 @@
                             <h3 class="font-semibold text-gray-700">Data Sources</h3>
                             <div class="mt-1 flex flex-wrap gap-2">
                                 ${sourcesStatus.map(source => `
-                                    <span class="px-2 py-1 rounded text-xs ${source.isError ? 'bg-red-100 text-red-800 tooltip' : 'bg-green-100 text-green-800'}">
-                                        ${source.name} ${source.isError ? '(Failed)' : ''}
+                                    <span class="px-2 py-1 rounded text-xs ${source.isError ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}">
+                                        <a href="${source.directUrl}" target="_blank" rel="noopener noreferrer" class="hover:underline">
+                                            ${source.name} ${source.isError ? '(Visit directly)' : ''}
+                                        </a>
                                         ${source.isError ? `<span class="tooltiptext">${source.error}</span>` : ''}
                                     </span>
                                 `).join('')}
@@ -612,8 +490,7 @@
                     const vulnerablePackage = getMainVulnerablePackage(sourcesData);
                     const epssScore = getEPSSScore(sourcesData);
                     const references = getReferences(sourcesData);
-                    const publishedDate = formatDate(sourcesData.NVD?.published || sourcesData.CIRCL?.Published || sourcesData.MITRE?.datePublished || sourcesData.WIZ?.publishedDate);
-                    const wizDetails = getWizDetails(sourcesData);
+                    const publishedDate = formatDate(sourcesData.NVD?.published || sourcesData.MITRE?.datePublished);
                     
                     const result = {
                         cveId,
@@ -624,7 +501,6 @@
                         vulnerablePackage,
                         description,
                         references,
-                        wizDetails,
                         sources: sourcesData
                     };
 
@@ -645,7 +521,6 @@
                         vulnerablePackage: 'N/A',
                         description: 'Failed to fetch data',
                         references: [],
-                        wizDetails: null,
                         sources: {}
                     };
                     cveResults.push(errorResult);
