@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CVE Lookup</title>
+    <link href="https://unpkg.com/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .tooltip {
+            position: relative;
+            display: inline-block;
+        }
+        .tooltip .tooltiptext {
+            visibility: hidden;
+            width: 200px;
+            background-color: #555;
+            color: #fff;
+            text-align: center;
+            border-radius: 6px;
+            padding: 5px;
+            position: absolute;
+            z-index: 1;
+            bottom: 125%;
+            left: 50%;
+            margin-left: -100px;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .tooltip:hover .tooltiptext {
+            visibility: visible;
+            opacity: 1;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto p-4 max-w-6xl">
+        <h1 class="text-3xl font-bold text-center mb-6">CVE Lookup</h1>
+        <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+            <div class="mb-4">
+                <label for="cveInput" class="block text-lg font-medium text-gray-700">Enter CVE IDs:</label>
+                <textarea id="cveInput" rows="5" class="mt-2 w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Comma-separated or on new lines, e.g., CVE-2021-44228, CVE-2020-12345\nCVE-2019-0708"></textarea>
+                <p class="mt-2 text-sm text-gray-500">Enter CVE IDs separated by commas, new lines, or both. Only IDs starting with 'CVE-' are processed.</p>
+            </div>
+            <div class="flex flex-wrap gap-4">
+                <button id="searchButton" class="flex-1 bg-blue-500 text-white p-3 rounded-lg hover:bg-blue-600 transition">
+                    <i class="fas fa-search mr-2"></i>Search CVEs
+                </button>
+                <button id="downloadButton" class="flex-1 bg-green-500 text-white p-3 rounded-lg hover:bg-green-600 transition hidden">
+                    <i class="fas fa-file-excel mr-2"></i>Download as Excel
+                </button>
+                <button id="clearButton" class="flex-1 bg-gray-500 text-white p-3 rounded-lg hover:bg-gray-600 transition">
+                    <i class="fas fa-broom mr-2"></i>Clear Results
+                </button>
+            </div>
+            <div id="loading" class="hidden mt-4 text-center text-gray-600">
+                <i class="fas fa-spinner fa-spin mr-2"></i>Loading CVE details...
+            </div>
+            <div id="error" class="hidden mt-4 p-4 text-center text-red-600 bg-red-100 rounded-lg"></div>
+        </div>
+
+        <div id="results" class="space-y-6">
+            <div id="tableContainer" class="hidden bg-white rounded-lg shadow-md overflow-hidden">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">CVE ID</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vulnerable Package</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">EPSS Score</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">CVSS Score</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultsTable" class="bg-white divide-y divide-gray-200"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const searchButton = document.getElementById('searchButton');
+        const downloadButton = document.getElementById('downloadButton');
+        const clearButton = document.getElementById('clearButton');
+        const cveInput = document.getElementById('cveInput');
+        const loading = document.getElementById('loading');
+        const errorDiv = document.getElementById('error');
+        const resultsDiv = document.getElementById('results');
+        const tableContainer = document.getElementById('tableContainer');
+        const resultsTable = document.getElementById('resultsTable');
+        let cveResults = [];
+
+        // List of CVE data sources with their APIs
+        const CVE_SOURCES = {
+            NVD: {
+                name: "National Vulnerability Database",
+                url: cveId => `https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=${cveId}`,
+                parse: data => data.vulnerabilities?.[0]?.cve || null,
+                error: null,
+                directUrl: cveId => `https://nvd.nist.gov/vuln/detail/${cveId}`
+            },
+            CIRCL: {
+                name: "CIRCL Luxembourg",
+                url: cveId => null, // We won't actually fetch this due to CORS
+                parse: data => null,
+                error: "*",
+                directUrl: cveId => `https://cve.circl.lu/cve/${cveId}`
+            },
+            MITRE: {
+                name: "MITRE CVE Database",
+                url: cveId => `https://cveawg.mitre.org/api/cve/${cveId}`,
+                parse: data => data || null,
+                error: null,
+                directUrl: cveId => `https://cve.mitre.org/cgi-bin/cvename.cgi?name=${cveId}`
+            },
+            WIZ: {
+                name: "Wiz Vulnerability Database",
+                url: cveId => null, // We won't actually fetch this due to CORS
+                parse: data => null,
+                error: "*",
+                directUrl: cveId => {
+                    // Convert CVE-YYYY-NNNN to cve-yyyy-nnnn for Wiz URL
+                    const lowerCaseCve = cveId.toLowerCase();
+                    return `https://www.wiz.io/vulnerability-database/cve/${lowerCaseCve}`;
+                }
+            }
+        };
+
+        // Additional data sources
+        const ADDITIONAL_SOURCES = {
+            EPSS: {
+                name: "Exploit Prediction Scoring System (EPSS)",
+                url: cveId => `https://api.first.org/data/v1/epss?cve=${cveId}`,
+                parse: data => data.data?.[0] || null,
+                error: null,
+                directUrl: cveId => `https://www.first.org/epss/#!/search/${cveId}`
+            }
+        };
+
+        async function fetchWithRetry(url, maxRetries = 3, delay = 5000) {
+            // Skip fetching if URL is null (for CIRCL and WIZ)
+            if (url === null) {
+                throw new Error('Direct visit required due to CORS');
+            }
+
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    const response = await fetch(url, {
+                        headers: {
+                            'Accept': 'application/json'
+                        }
+                    });
+                    if (response.status === 429) {
+                        if (attempt === maxRetries) throw new Error('Rate limit exceeded');
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        continue;
+                    }
+                    if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
+                    return await response.json();
+                } catch (error) {
+                    if (attempt === maxRetries) throw error;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+        }
+
+        async function fetchAllSources(cveId) {
+            const results = {};
+            
+            // Fetch from primary CVE sources
+            for (const [sourceName, source] of Object.entries(CVE_SOURCES)) {
+                try {
+                    // Skip fetching for CIRCL and WIZ
+                    if (sourceName === 'CIRCL' || sourceName === 'WIZ') {
+                        results[sourceName] = { error: source.error };
+                        continue;
+                    }
+                    
+                    const data = await fetchWithRetry(source.url(cveId));
+                    results[sourceName] = source.parse(data);
+                    if (!results[sourceName]) throw new Error('No data returned');
+                    source.error = null;
+                } catch (error) {
+                    console.error(`Error fetching ${sourceName} data for ${cveId}:`, error);
+                    results[sourceName] = { error: error.message };
+                    source.error = error.message;
+                }
+            }
+            
+            // Fetch from additional sources
+            for (const [sourceName, source] of Object.entries(ADDITIONAL_SOURCES)) {
+                try {
+                    const data = await fetchWithRetry(source.url(cveId));
+                    results[sourceName] = source.parse(data);
+                    if (!results[sourceName]) throw new Error('No data returned');
+                    source.error = null;
+                } catch (error) {
+                    console.error(`Error fetching ${sourceName} data for ${cveId}:`, error);
+                    results[sourceName] = { error: error.message };
+                    source.error = error.message;
+                }
+            }
+            
+            return results;
+        }
+
+        function formatDate(dateString) {
+            if (!dateString) return 'N/A';
+            return new Date(dateString).toLocaleDateString();
+        }
+
+        function getCVSSScore(data) {
+            // Try NVD first
+            if (data.NVD?.metrics?.cvssMetricV31?.[0]?.cvssData?.baseScore) {
+                return data.NVD.metrics.cvssMetricV31[0].cvssData.baseScore;
+            }
+            if (data.NVD?.metrics?.cvssMetricV30?.[0]?.cvssData?.baseScore) {
+                return data.NVD.metrics.cvssMetricV30[0].cvssData.baseScore;
+            }
+            
+            return 'N/A';
+        }
+
+        function getSeverity(data) {
+            // Try NVD first
+            if (data.NVD?.metrics?.cvssMetricV31?.[0]?.cvssData?.baseSeverity) {
+                return data.NVD.metrics.cvssMetricV31[0].cvssData.baseSeverity;
+            }
+            if (data.NVD?.metrics?.cvssMetricV30?.[0]?.cvssData?.baseSeverity) {
+                return data.NVD.metrics.cvssMetricV30[0].cvssData.baseSeverity;
+            }
+            
+            return 'N/A';
+        }
+
+        function getDescription(data) {
+            if (data.NVD?.descriptions) {
+                const enDesc = data.NVD.descriptions.find(d => d.lang === 'en');
+                if (enDesc) return enDesc.value;
+            }
+            if (data.MITRE?.descriptions) {
+                const enDesc = data.MITRE.descriptions.find(d => d.lang === 'en');
+                if (enDesc) return enDesc.value;
+            }
+            return 'No description available';
+        }
+
+        function getMainVulnerablePackage(data) {
+            // Try to extract the main vulnerable package from CPEs
+            if (data.NVD?.configurations) {
+                for (const config of data.NVD.configurations) {
+                    for (const node of config.nodes) {
+                        for (const cpe of node.cpeMatch || []) {
+                            if (cpe.criteria) {
+                                const parts = cpe.criteria.split(':');
+                                if (parts[3] && parts[3] !== '*') {
+                                    return parts[3]; // Return the product name
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Try to extract from description as fallback
+            const description = getDescription(data).toLowerCase();
+            const commonPackages = ['log4j', 'openssl', 'libxml', 'pam', 'nginx', 'apache', 'linux kernel', 'windows', 'wordpress'];
+            for (const pkg of commonPackages) {
+                if (description.includes(pkg)) {
+                    return pkg.charAt(0).toUpperCase() + pkg.slice(1);
+                }
+            }
+            
+            return 'N/A';
+        }
+
+        function getEPSSScore(data) {
+            if (data.EPSS?.epss) {
+                return (data.EPSS.epss * 100).toFixed(2) + '%';
+            }
+            return 'N/A';
+        }
+
+        function getReferences(data) {
+            const references = new Set();
+            
+            // From NVD
+            if (data.NVD?.references) {
+                for (const ref of data.NVD.references) {
+                    if (ref.url) references.add(ref.url);
+                }
+            }
+            
+            // From MITRE
+            if (data.MITRE?.references) {
+                for (const ref of data.MITRE.references) {
+                    if (ref.url) references.add(ref.url);
+                }
+            }
+            
+            return Array.from(references);
+        }
+
+        function parseCVEInput(input) {
+            return input
+                .split(/[\n,]+/)
+                .map(cve => cve.trim())
+                .filter(cve => cve && cve.match(/^CVE-\d{4}-\d{4,7}$/i))
+                .map(cve => cve.toUpperCase());
+        }
+
+        function downloadExcel() {
+            const worksheetData = cveResults.map(result => ({
+                'CVE ID': result.cveId,
+                'Vulnerable Package': result.vulnerablePackage,
+                'EPSS Score': result.epssScore,
+                'CVSS Score': result.cvssScore,
+                'Severity': result.severity,
+                'Published Date': result.publishedDate,
+                'Description': result.description,
+                'References': result.references.join('\n')
+            }));
+
+            const worksheet = XLSX.utils.json_to_sheet(worksheetData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, 'CVE Results');
+            XLSX.writeFile(workbook, 'cve_results.xlsx');
+        }
+
+        function clearResults() {
+            cveInput.value = '';
+            resultsTable.innerHTML = '';
+            tableContainer.classList.add('hidden');
+            errorDiv.classList.add('hidden');
+            downloadButton.classList.add('hidden');
+            cveResults = [];
+        }
+
+        function toggleRowDetails(rowId) {
+            const detailsRow = document.getElementById(`details-${rowId}`);
+            const icon = document.getElementById(`icon-${rowId}`);
+            
+            if (detailsRow.classList.contains('hidden')) {
+                detailsRow.classList.remove('hidden');
+                icon.className = 'fas fa-chevron-up';
+            } else {
+                detailsRow.classList.add('hidden');
+                icon.className = 'fas fa-chevron-down';
+            }
+        }
+
+        function getSeverityColor(severity) {
+            switch(severity) {
+                case 'CRITICAL': return 'bg-red-800 text-white';
+                case 'HIGH': return 'bg-red-600 text-white';
+                case 'MEDIUM': return 'bg-amber-500 text-white';
+                case 'LOW': return 'bg-green-500 text-white';
+                default: return 'bg-gray-100 text-gray-800';
+            }
+        }
+
+        function getEPSSColor(epssScore) {
+            if (epssScore === 'N/A') return 'bg-gray-100 text-gray-800';
+            const score = parseFloat(epssScore);
+            if (score >= 90) return 'bg-red-600 text-white';
+            if (score >= 70) return 'bg-orange-500 text-white';
+            if (score >= 30) return 'bg-yellow-400 text-gray-800';
+            return 'bg-green-500 text-white';
+        }
+
+        function renderTableRow(result, index) {
+            const row = document.createElement('tr');
+            row.className = 'hover:bg-gray-50 cursor-pointer';
+            row.onclick = () => toggleRowDetails(index);
+            
+            const severityColor = getSeverityColor(result.severity);
+            const epssColor = getEPSSColor(result.epssScore.replace('%', ''));
+            
+            row.innerHTML = `
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <div class="flex items-center">
+                        <div class="flex-shrink-0 h-10 w-10 flex items-center justify-center">
+                            <i id="icon-${index}" class="fas fa-chevron-down text-gray-400"></i>
+                        </div>
+                        <div class="ml-4">
+                            <div class="text-sm font-medium text-gray-900">${result.cveId}</div>
+                        </div>
+                    </div>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <div class="text-sm text-gray-900 font-medium">${result.vulnerablePackage}</div>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${epssColor}">
+                        ${result.epssScore}
+                    </span>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${severityColor}">
+                        ${result.cvssScore} (${result.severity})
+                    </span>
+                </td>
+            `;
+            
+            const detailsRow = document.createElement('tr');
+            detailsRow.id = `details-${index}`;
+            detailsRow.className = 'hidden bg-gray-50';
+            
+            // Prepare data sources status with direct links
+            const allSources = {...CVE_SOURCES, ...ADDITIONAL_SOURCES};
+            const sourcesStatus = Object.entries(allSources).map(([name, source]) => {
+                const isError = source.error !== null;
+                const directUrl = source.directUrl(result.cveId);
+                return {
+                    name,
+                    isError,
+                    error: source.error,
+                    directUrl
+                };
+            });
+
+            detailsRow.innerHTML = `
+                <td colspan="4" class="px-6 py-4">
+                    <div class="space-y-4">
+                        <div>
+                            <h3 class="font-semibold text-gray-700">Description</h3>
+                            <p class="text-gray-800 mt-1">${result.description}</p>
+                        </div>
+                        
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <h3 class="font-semibold text-gray-700">Published Date</h3>
+                                <p class="text-gray-800 mt-1">${result.publishedDate}</p>
+                            </div>
+                            <div>
+                                <h3 class="font-semibold text-gray-700">References</h3>
+                                <div class="mt-1 space-y-1">
+                                    ${result.references.slice(0, 3).map(ref => `
+                                        <p class="text-blue-600 hover:underline">
+                                            <a href="${ref}" target="_blank" rel="noopener noreferrer">
+                                                <i class="fas fa-external-link-alt mr-1"></i>${ref.length > 80 ? ref.substring(0, 80) + '...' : ref}
+                                            </a>
+                                        </p>
+                                    `).join('')}
+                                    ${result.references.length > 3 ? `<p class="text-gray-500">+ ${result.references.length - 3} more references</p>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold text-gray-700">Data Sources</h3>
+                            <div class="mt-1 flex flex-wrap gap-2">
+                                ${sourcesStatus.map(source => `
+                                    <span class="px-2 py-1 rounded text-xs ${source.isError ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}">
+                                        <a href="${source.directUrl}" target="_blank" rel="noopener noreferrer" class="hover:underline">
+                                            ${source.name} ${source.isError ? '' : ''}
+                                        </a>
+                                        ${source.isError ? `<span class="tooltiptext">${source.error}</span>` : ''}
+                                    </span>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                </td>
+            `;
+            
+            resultsTable.appendChild(row);
+            resultsTable.appendChild(detailsRow);
+        }
+
+        async function searchCVEs() {
+            const cveList = parseCVEInput(cveInput.value);
+            if (cveList.length === 0) {
+                errorDiv.textContent = 'Please enter valid CVE IDs starting with "CVE-" (e.g., CVE-2021-44228)';
+                errorDiv.classList.remove('hidden');
+                resultsTable.innerHTML = '';
+                tableContainer.classList.add('hidden');
+                downloadButton.classList.add('hidden');
+                return;
+            }
+
+            loading.classList.remove('hidden');
+            errorDiv.classList.add('hidden');
+            resultsTable.innerHTML = '';
+            tableContainer.classList.remove('hidden');
+            downloadButton.classList.add('hidden');
+            cveResults = [];
+
+            for (const cveId of cveList) {
+                try {
+                    const sourcesData = await fetchAllSources(cveId);
+                    
+                    const cvssScore = getCVSSScore(sourcesData);
+                    const severity = getSeverity(sourcesData);
+                    const description = getDescription(sourcesData);
+                    const vulnerablePackage = getMainVulnerablePackage(sourcesData);
+                    const epssScore = getEPSSScore(sourcesData);
+                    const references = getReferences(sourcesData);
+                    const publishedDate = formatDate(sourcesData.NVD?.published || sourcesData.MITRE?.datePublished);
+                    
+                    const result = {
+                        cveId,
+                        cvssScore,
+                        severity,
+                        epssScore,
+                        publishedDate,
+                        vulnerablePackage,
+                        description,
+                        references,
+                        sources: sourcesData
+                    };
+
+                    cveResults.push(result);
+                    renderTableRow(result, cveResults.length - 1);
+                    
+                    // Delay to respect rate limits (especially for NVD)
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                } catch (error) {
+                    console.error(`Error processing ${cveId}:`, error);
+                    const errorResult = {
+                        cveId,
+                        error: `Failed to fetch data for ${cveId}: ${error.message}`,
+                        cvssScore: 'N/A',
+                        severity: 'N/A',
+                        epssScore: 'N/A',
+                        publishedDate: 'N/A',
+                        vulnerablePackage: 'N/A',
+                        description: 'Failed to fetch data',
+                        references: [],
+                        sources: {}
+                    };
+                    cveResults.push(errorResult);
+                    renderTableRow(errorResult, cveResults.length - 1);
+                }
+            }
+
+            loading.classList.add('hidden');
+            if (cveResults.some(r => !r.error)) {
+                downloadButton.classList.remove('hidden');
+            }
+        }
+
+        searchButton.addEventListener('click', searchCVEs);
+        downloadButton.addEventListener('click', downloadExcel);
+        clearButton.addEventListener('click', clearResults);
+        
+        cveInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && e.ctrlKey) {
+                e.preventDefault();
+                searchCVEs();
+            }
+        });
+    </script>
+</body>
+</html>
