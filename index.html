@@ -3,15 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CVE Lookup</title>
+    <title>CVE & SBOM Intel v4.0</title>
     <link href="https://unpkg.com/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
         body { font-family: 'Inter', sans-serif; background-color: #fcfdfe; color: #334155; }
-
-        /* Modern Pastel Link Cards (Purple) */
+        
         .research-card {
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             border: 1px solid #f3e8ff;
@@ -24,14 +23,12 @@
             background: #f3e8ff;
             box-shadow: 0 4px 20px -2px rgba(126, 34, 206, 0.1);
         }
-
-        /* Sleek Loading Progress */
+        
         .progress-bar-fill {
             transition: width 0.4s ease-out;
             background: linear-gradient(90deg, #3b82f6, #8b5cf6);
         }
 
-        /* Modern Pastel Severities & Tabs */
         .theme-total { background-color: #f1f5f9; color: #475569; border-color: #e2e8f0; }
         .theme-critical { background-color: #fee2e2; color: #991b1b; border-color: #fecaca; }
         .theme-high { background-color: #ffedd5; color: #9a3412; border-color: #fed7aa; }
@@ -42,57 +39,62 @@
         .btn-analyze { background-color: #2563eb; transition: all 0.2s; }
         .btn-analyze:hover { background-color: #1d4ed8; transform: translateY(-1px); }
         .btn-refresh { background-color: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
-        .btn-refresh:hover { background-color: #e2e8f0; }
-
-        .stat-card { border-width: 1px; border-radius: 1.25rem; transition: transform 0.2s, box-shadow 0.2s; }
-        .stat-card:hover { transform: translateY(-3px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05); }
+        
+        .upload-zone {
+            border: 2px dashed #e2e8f0;
+            transition: all 0.2s;
+        }
+        .upload-zone:hover { border-color: #3b82f6; background: #eff6ff; }
+        
+        .stat-card { border-width: 1px; border-radius: 1.25rem; transition: transform 0.2s; }
     </style>
 </head>
 <body class="min-h-screen pb-24">
     <div class="container mx-auto p-6 max-w-6xl">
-
+        
         <div class="flex items-center mb-10 mt-4">
-            <div class="p-3 bg-blue-600 rounded-2xl shadow-lg shadow-blue-100 mr-4">
-                <i class="fas fa-shield-halved text-white text-2xl"></i>
+            <div class="p-3 bg-blue-600 rounded-2xl shadow-lg mr-4">
+                <i class="fas fa-microchip text-white text-2xl"></i>
             </div>
             <h1 class="text-3xl font-extrabold tracking-tight text-slate-900">
-                CVE Lookup <span class="text-slate-300 text-sm font-medium ml-1">v0.1</span>
+                CVE & SBOM Scanner <span class="text-slate-300 text-sm font-medium ml-1">v4.0</span>
             </h1>
         </div>
 
         <div class="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-8 mb-8">
-            <div class="flex justify-between items-center mb-4">
-                <label class="text-xs font-black text-slate-400 uppercase tracking-widest">Target CVE IDs:</label>
-                <div id="exportGroup" class="hidden flex gap-2">
-                    <button id="downloadExcel" class="text-[10px] font-bold bg-white text-green-600 px-3 py-1.5 rounded-lg border border-green-100 hover:bg-green-50 transition">
-                        <i class="fas fa-file-excel mr-1"></i> EXCEL
-                    </button>
-                    <button id="downloadJson" class="text-[10px] font-bold bg-white text-purple-600 px-3 py-1.5 rounded-lg border border-purple-100 hover:bg-purple-50 transition">
-                        <i class="fas fa-code mr-1"></i> JSON
-                    </button>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-6">
+                <div>
+                    <label class="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 block">Manual CVE Lookup:</label>
+                    <textarea id="cveInput" rows="4" 
+                        class="w-full p-5 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-4 focus:ring-blue-50 focus:bg-white transition-all outline-none text-slate-600 font-mono text-sm" 
+                        placeholder="Paste CVE-2021-44228..."></textarea>
+                </div>
+                <div>
+                    <label class="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 block">Upload SBOM (JSON):</label>
+                    <div id="dropZone" class="upload-zone h-[132px] rounded-2xl flex flex-col items-center justify-center cursor-pointer text-slate-400">
+                        <i class="fas fa-cloud-arrow-up text-2xl mb-2"></i>
+                        <span class="text-xs font-bold" id="fileName">Drag & Drop CycloneDX / SPDX</span>
+                        <input type="file" id="sbomFile" class="hidden" accept=".json">
+                    </div>
                 </div>
             </div>
-
-            <textarea id="cveInput" rows="3"
-                class="w-full p-5 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-4 focus:ring-blue-50 focus:bg-white transition-all outline-none text-slate-600 font-mono text-sm mb-6"
-                placeholder="CVE-2021-44228, CVE-2023-23397..."></textarea>
-
+            
             <div class="flex items-center gap-4">
                 <button id="searchButton" class="btn-analyze flex-grow text-white py-4 rounded-2xl font-bold flex items-center justify-center shadow-lg shadow-blue-100">
-                    <i class="fas fa-magnifying-glass mr-2 text-sm"></i> Analyze CVEs
+                    <i class="fas fa-bolt mr-2 text-sm"></i> Run Full Analysis
                 </button>
                 <button id="refreshButton" class="btn-refresh p-4 rounded-2xl flex items-center justify-center transition">
                     <i class="fas fa-rotate-right"></i>
                 </button>
             </div>
-
+            
             <div id="loading" class="hidden mt-8">
                 <div class="flex justify-between items-end mb-2">
                     <div class="flex items-center">
                         <i class="fas fa-circle-notch fa-spin text-blue-500 mr-3"></i>
-                        <span id="loadingStatus" class="text-sm font-bold text-slate-700">Initializing Scan...</span>
+                        <span id="loadingStatus" class="text-sm font-bold text-slate-700">Identifying vulnerabilities...</span>
                     </div>
-                    <span id="loadingCount" class="text-[10px] font-black text-slate-400 uppercase tracking-tighter">0 / 0</span>
+                    <span id="loadingCount" class="text-[10px] font-black text-slate-400">0 / 0</span>
                 </div>
                 <div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
                     <div id="progressBar" class="progress-bar-fill h-full w-0"></div>
@@ -101,40 +103,22 @@
         </div>
 
         <div id="summaryStats" class="hidden grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-10">
-            <div class="stat-card p-5 text-center theme-total">
-                <p class="text-[10px] font-black uppercase tracking-widest opacity-60 mb-1">Total</p>
-                <p id="stat-total" class="text-2xl font-extrabold">0</p>
-            </div>
-            <div class="stat-card p-5 text-center theme-critical">
-                <p class="text-[10px] font-black uppercase tracking-widest opacity-70 mb-1">Critical</p>
-                <p id="stat-critical" class="text-2xl font-extrabold">0</p>
-            </div>
-            <div class="stat-card p-5 text-center theme-high">
-                <p class="text-[10px] font-black uppercase tracking-widest opacity-70 mb-1">High</p>
-                <p id="stat-high" class="text-2xl font-extrabold">0</p>
-            </div>
-            <div class="stat-card p-5 text-center theme-medium">
-                <p class="text-[10px] font-black uppercase tracking-widest opacity-70 mb-1">Medium</p>
-                <p id="stat-medium" class="text-2xl font-extrabold">0</p>
-            </div>
-            <div class="stat-card p-5 text-center theme-epss">
-                <p class="text-[10px] font-black uppercase tracking-widest opacity-70 mb-1">EPSS > 10%</p>
-                <p id="stat-epss-high" class="text-2xl font-extrabold">0</p>
-            </div>
-            <div class="stat-card p-5 text-center theme-kev">
-                <p class="text-[10px] font-black uppercase tracking-widest opacity-70 mb-1">CISA KEV</p>
-                <p id="stat-kev" class="text-2xl font-extrabold">0</p>
-            </div>
+            <div class="stat-card p-5 text-center theme-total"><p class="text-[10px] font-black uppercase opacity-60 mb-1">Total</p><p id="stat-total" class="text-2xl font-extrabold">0</p></div>
+            <div class="stat-card p-5 text-center theme-critical"><p class="text-[10px] font-black uppercase opacity-70 mb-1">Critical</p><p id="stat-critical" class="text-2xl font-extrabold">0</p></div>
+            <div class="stat-card p-5 text-center theme-high"><p class="text-[10px] font-black uppercase opacity-70 mb-1">High</p><p id="stat-high" class="text-2xl font-extrabold">0</p></div>
+            <div class="stat-card p-5 text-center theme-medium"><p class="text-[10px] font-black uppercase opacity-70 mb-1">Medium</p><p id="stat-medium" class="text-2xl font-extrabold">0</p></div>
+            <div class="stat-card p-5 text-center theme-epss"><p class="text-[10px] font-black uppercase opacity-70 mb-1">EPSS > 10%</p><p id="stat-epss-high" class="text-2xl font-extrabold">0</p></div>
+            <div class="stat-card p-5 text-center theme-kev"><p class="text-[10px] font-black uppercase opacity-70 mb-1">CISA KEV</p><p id="stat-kev" class="text-2xl font-extrabold">0</p></div>
         </div>
 
         <div id="tableContainer" class="hidden bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden">
             <table class="min-w-full divide-y divide-slate-50">
                 <thead class="bg-slate-50/50">
                     <tr class="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                        <th class="px-8 py-5 text-left">CVE Identification</th>
-                        <th class="px-8 py-5 text-left">Impacted Product</th>
+                        <th class="px-8 py-5 text-left">Security Identifier</th>
+                        <th class="px-8 py-5 text-left">Origin / Component</th>
                         <th class="px-8 py-5 text-left">Exploit Prob.</th>
-                        <th class="px-8 py-5 text-center">Severity</th>
+                        <th class="px-8 py-5 text-center">CVSS Severity</th>
                     </tr>
                 </thead>
                 <tbody id="resultsTable" class="divide-y divide-slate-50"></tbody>
@@ -144,6 +128,7 @@
 
     <script>
         let cveData = [];
+        let sbomCves = [];
         const CVE_REGEX = /\bCVE-\d{4}-\d{4,7}\b/gi;
 
         const THREAT_LINKS = {
@@ -152,75 +137,114 @@
             "Snyk Intel": id => `https://snyk.io/vuln/${id}`,
             "GitHub Advisory": id => `https://github.com/advisories?query=${id}`,
             "MITRE AWG": id => `https://cveawg.mitre.org/api/cve/${id}`,
-            "Vulners Hub": id => `https://vulners.com/cve/${id}`,
-            "CVE.org": id => `https://www.cve.org/CVERecord?id=${id}`,
-            "CIRCL.lu": id => `https://cve.circl.lu/cve/${id}`
+            "Vulners Hub": id => `https://vulners.com/cve/${id}`
         };
+
+        // SBOM Handling
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('sbomFile');
+        dropZone.onclick = () => fileInput.click();
+        fileInput.onchange = (e) => handleFile(e.target.files[0]);
+
+        async function handleFile(file) {
+            if (!file) return;
+            document.getElementById('fileName').textContent = file.name;
+            const text = await file.text();
+            try {
+                const json = JSON.parse(text);
+                const components = json.components || json.packages || [];
+                sbomCves = [];
+                
+                // Logic to extract PURLs/Names for scanning
+                for(let comp of components) {
+                    const name = comp.name;
+                    const version = comp.version;
+                    if(name && version) sbomCves.push({ name, version });
+                }
+                console.log("SBOM Components extracted:", sbomCves.length);
+            } catch (e) { alert("Invalid JSON SBOM format."); }
+        }
 
         async function analyze() {
             const raw = document.getElementById('cveInput').value;
-            const matches = [...new Set((raw.match(CVE_REGEX) || []).map(c => c.toUpperCase()))];
-            if (matches.length === 0) return alert("Please enter valid CVE IDs.");
-
+            const manualMatches = [...new Set((raw.match(CVE_REGEX) || []).map(c => c.toUpperCase()))];
+            
             cveData = [];
             const loader = document.getElementById('loading');
             const progress = document.getElementById('progressBar');
             loader.classList.remove('hidden');
 
-            for (let i = 0; i < matches.length; i++) {
-                const id = matches[i];
-                document.getElementById('loadingStatus').textContent = `Processing ${id}`;
-                document.getElementById('loadingCount').textContent = `${i + 1} / ${matches.length}`;
-                progress.style.width = `${((i + 1) / matches.length) * 100}%`;
+            // 1. Process Manual CVEs
+            for (let i = 0; i < manualMatches.length; i++) {
+                const id = manualMatches[i];
+                document.getElementById('loadingStatus').textContent = `Checking ${id}`;
+                document.getElementById('loadingCount').textContent = `${i + 1} / ${manualMatches.length}`;
+                progress.style.width = `${((i + 1) / (manualMatches.length + sbomCves.length)) * 100}%`;
+                await fetchCveDetails(id, "Manual Input");
+            }
 
+            // 2. Process SBOM Components (Conceptual NVD keyword search)
+            for (let i = 0; i < sbomCves.length; i++) {
+                const comp = sbomCves[i];
+                document.getElementById('loadingStatus').textContent = `Scanning ${comp.name}`;
+                progress.style.width = `${((manualMatches.length + i + 1) / (manualMatches.length + sbomCves.length)) * 100}%`;
+                
+                // Note: For real-world SBOM, you'd hit an API like OSS Index or NVD CPE search
+                // Here we perform a keyword search for the component name to find related CVEs
                 try {
-                    const [nvdRes, epssRes] = await Promise.all([
-                        fetch(`https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=${id}`).then(r => r.json()),
-                        fetch(`https://api.first.org/data/v1/epss?cve=${id}`).then(r => r.json())
-                    ]);
-
-                    const nvd = nvdRes?.vulnerabilities?.[0]?.cve;
-                    const m = nvd?.metrics?.cvssMetricV31?.[0]?.cvssData || nvd?.metrics?.cvssMetricV30?.[0]?.cvssData;
-
-                    cveData.push({
-                        id,
-                        score: m?.baseScore || 0,
-                        severity: m?.baseSeverity || 'UNKNOWN',
-                        epssRaw: epssRes?.data?.[0]?.epss || 0,
-                        epssP: (epssRes?.data?.[0]?.epss * 100).toFixed(2) + '%',
-                        desc: nvd?.descriptions?.find(d => d.lang === 'en')?.value || "No detailed description provided.",
-                        isKev: !!nvd?.cisaExploitAdd,
-                        pkg: nvd?.configurations?.[0]?.nodes?.[0]?.cpeMatch?.[0]?.criteria?.split(':')[4] || 'N/A',
-                        refs: nvd?.references?.map(r => r.url) || []
-                    });
-                } catch (e) { console.error(e); }
-
-                render();
-                updateStats();
-                if (matches.length > 1) await new Promise(r => setTimeout(r, 600));
+                    const res = await fetch(`https://services.nvd.nist.gov/rest/json/cves/2.0?keywordSearch=${comp.name} ${comp.version}`).then(r => r.json());
+                    const found = res?.vulnerabilities?.slice(0, 2) || []; // Limit to top 2 for speed
+                    for(let v of found) {
+                        await fetchCveDetails(v.cve.id, comp.name);
+                    }
+                } catch(e) {}
+                if (i % 2 === 0) await new Promise(r => setTimeout(r, 600)); // NVD Rate limiting
             }
 
             loader.classList.add('hidden');
-            document.getElementById('exportGroup').classList.remove('hidden');
             document.getElementById('summaryStats').classList.remove('hidden');
             document.getElementById('tableContainer').classList.remove('hidden');
+        }
+
+        async function fetchCveDetails(id, source) {
+            try {
+                const [nvdRes, epssRes] = await Promise.all([
+                    fetch(`https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=${id}`).then(r => r.json()),
+                    fetch(`https://api.first.org/data/v1/epss?cve=${id}`).then(r => r.json())
+                ]);
+
+                const nvd = nvdRes?.vulnerabilities?.[0]?.cve;
+                const m = nvd?.metrics?.cvssMetricV31?.[0]?.cvssData || nvd?.metrics?.cvssMetricV30?.[0]?.cvssData;
+                
+                cveData.push({
+                    id,
+                    score: m?.baseScore || 0,
+                    severity: m?.baseSeverity || 'UNKNOWN',
+                    epssRaw: epssRes?.data?.[0]?.epss || 0,
+                    epssP: (epssRes?.data?.[0]?.epss * 100).toFixed(2) + '%',
+                    desc: nvd?.descriptions?.find(d => d.lang === 'en')?.value || "No data.",
+                    isKev: !!nvd?.cisaExploitAdd,
+                    pkg: source,
+                    refs: nvd?.references?.map(r => r.url) || []
+                });
+                render();
+                updateStats();
+            } catch (e) {}
         }
 
         function render() {
             const tbody = document.getElementById('resultsTable');
             tbody.innerHTML = '';
-
             cveData.forEach((item, idx) => {
                 const row = document.createElement('tr');
                 row.className = `cursor-pointer transition-all hover:bg-slate-50/50 ${item.isKev ? 'border-l-4 border-purple-500' : ''}`;
                 row.onclick = () => document.getElementById(`detail-${idx}`).classList.toggle('hidden');
-
                 row.innerHTML = `
                     <td class="px-8 py-5">
                         <span class="font-bold text-slate-800">${item.id}</span>
-                        ${item.isKev ? '<span class="ml-2 text-[8px] font-black bg-purple-600 text-white px-1.5 py-0.5 rounded-full">CISA KEV</span>' : ''}
+                        ${item.isKev ? '<span class="ml-2 text-[8px] font-black bg-purple-600 text-white px-1.5 py-0.5 rounded-full uppercase">CISA KEV</span>' : ''}
                     </td>
-                    <td class="px-8 py-5 text-[11px] font-bold text-slate-400 uppercase tracking-tighter">${item.pkg}</td>
+                    <td class="px-8 py-5 text-[11px] font-bold text-slate-400 uppercase">${item.pkg}</td>
                     <td class="px-8 py-5 text-xs font-bold text-blue-500">${item.epssP}</td>
                     <td class="px-8 py-5 text-center">
                         <span class="px-3 py-1 rounded-full text-[10px] font-black inline-block min-w-[90px] ${getSevTheme(item.severity)}">
@@ -228,7 +252,6 @@
                         </span>
                     </td>
                 `;
-
                 const detail = document.createElement('tr');
                 detail.id = `detail-${idx}`;
                 detail.className = 'hidden bg-slate-50/30';
@@ -236,21 +259,16 @@
                     <td colspan="4" class="px-10 py-8">
                         <div class="grid grid-cols-1 lg:grid-cols-3 gap-12">
                             <div class="lg:col-span-2">
-                                <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Vulnerability Summary</h4>
+                                <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Vulnerability Detail</h4>
                                 <p class="text-sm text-slate-600 leading-relaxed mb-6">${item.desc}</p>
-                                <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Resources & References</h4>
                                 <div class="grid grid-cols-1 gap-2">
-                                    ${item.refs.slice(0, 4).map(r => `<a href="${r}" target="_blank" class="text-[11px] text-blue-400 hover:text-blue-600 truncate"><i class="fas fa-link mr-2 opacity-40"></i>${r}</a>`).join('')}
+                                    ${item.refs.slice(0, 3).map(r => `<a href="${r}" target="_blank" class="text-[11px] text-blue-400 truncate"><i class="fas fa-link mr-2 opacity-40"></i>${r}</a>`).join('')}
                                 </div>
                             </div>
                             <div>
                                 <h4 class="text-[10px] font-black text-purple-800 uppercase tracking-widest mb-4">Threat Research</h4>
                                 <div class="grid grid-cols-2 gap-3">
-                                    ${Object.entries(THREAT_LINKS).map(([name, fn]) => `
-                                        <a href="${fn(item.id)}" target="_blank" class="research-card p-3 rounded-xl text-[10px] font-bold text-center">
-                                            ${name}
-                                        </a>
-                                    `).join('')}
+                                    ${Object.entries(THREAT_LINKS).map(([name, fn]) => `<a href="${fn(item.id)}" target="_blank" class="research-card p-3 rounded-xl text-[10px] font-bold text-center">${name}</a>`).join('')}
                                 </div>
                             </div>
                         </div>
@@ -287,19 +305,6 @@
 
         document.getElementById('searchButton').onclick = analyze;
         document.getElementById('refreshButton').onclick = () => location.reload();
-
-        document.getElementById('downloadExcel').onclick = () => {
-            const ws = XLSX.utils.json_to_sheet(cveData);
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, "Analysis");
-            XLSX.writeFile(wb, "CVE_Lookup_Report.xlsx");
-        };
-
-        document.getElementById('downloadJson').onclick = () => {
-            const blob = new Blob([JSON.stringify(cveData, null, 2)], { type: "application/json" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a'); a.href = url; a.download = "cve_data.json"; a.click();
-        };
     </script>
 </body>
 </html>
