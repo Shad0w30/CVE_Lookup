@@ -3,377 +3,303 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CVE Pro Lookup - Client Side</title>
+    <title>CVE Lookup</title>
     <link href="https://unpkg.com/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        .severity-pill { transition: all 0.2s; }
-        .severity-pill:hover { transform: scale(1.05); }
-        .sort-icon { font-size: 0.7rem; margin-left: 4px; color: #cbd5e0; }
-        .active-sort { color: #4a5568 !important; }
-        tr.kev-row { border-left: 4px solid #dc2626; }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #fcfdfe; color: #334155; }
+
+        /* Modern Pastel Link Cards (Purple) */
+        .research-card {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1px solid #f3e8ff;
+            background: #faf5ff;
+            color: #7e22ce;
+        }
+        .research-card:hover {
+            transform: translateY(-2px);
+            border-color: #d8b4fe;
+            background: #f3e8ff;
+            box-shadow: 0 4px 20px -2px rgba(126, 34, 206, 0.1);
+        }
+
+        /* Sleek Loading Progress */
+        .progress-bar-fill {
+            transition: width 0.4s ease-out;
+            background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+        }
+
+        /* Modern Pastel Severities & Tabs */
+        .theme-total { background-color: #f1f5f9; color: #475569; border-color: #e2e8f0; }
+        .theme-critical { background-color: #fee2e2; color: #991b1b; border-color: #fecaca; }
+        .theme-high { background-color: #ffedd5; color: #9a3412; border-color: #fed7aa; }
+        .theme-medium { background-color: #fef3c7; color: #92400e; border-color: #fde68a; }
+        .theme-epss { background-color: #eff6ff; color: #1d4ed8; border-color: #dbeafe; }
+        .theme-kev { background-color: #f5f3ff; color: #5b21b6; border-color: #ddd6fe; }
+
+        .btn-analyze { background-color: #2563eb; transition: all 0.2s; }
+        .btn-analyze:hover { background-color: #1d4ed8; transform: translateY(-1px); }
+        .btn-refresh { background-color: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
+        .btn-refresh:hover { background-color: #e2e8f0; }
+
+        .stat-card { border-width: 1px; border-radius: 1.25rem; transition: transform 0.2s, box-shadow 0.2s; }
+        .stat-card:hover { transform: translateY(-3px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05); }
     </style>
 </head>
-<body class="bg-gray-50 min-h-screen pb-20">
-    <div class="container mx-auto p-4 max-w-6xl">
-        <div class="flex justify-between items-center mb-6">
-            <h1 class="text-3xl font-extrabold text-gray-800"><i class="fas fa-shield-virus text-blue-600 mr-3"></i>CVE Lookup <span class="text-sm font-normal text-gray-500">v2.0</span></h1>
-            <div class="space-x-2">
-                <button id="exportJson" class="hidden text-sm bg-purple-500 text-white px-3 py-1 rounded hover:bg-purple-600 transition">
-                    <i class="fas fa-code mr-1"></i> JSON
+<body class="min-h-screen pb-24">
+    <div class="container mx-auto p-6 max-w-6xl">
+
+        <div class="flex items-center mb-10 mt-4">
+            <div class="p-3 bg-blue-600 rounded-2xl shadow-lg shadow-blue-100 mr-4">
+                <i class="fas fa-shield-halved text-white text-2xl"></i>
+            </div>
+            <h1 class="text-3xl font-extrabold tracking-tight text-slate-900">
+                CVE Lookup <span class="text-slate-300 text-sm font-medium ml-1">v3.1</span>
+            </h1>
+        </div>
+
+        <div class="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-8 mb-8">
+            <div class="flex justify-between items-center mb-4">
+                <label class="text-xs font-black text-slate-400 uppercase tracking-widest">Target CVE IDs:</label>
+                <div id="exportGroup" class="hidden flex gap-2">
+                    <button id="downloadExcel" class="text-[10px] font-bold bg-white text-green-600 px-3 py-1.5 rounded-lg border border-green-100 hover:bg-green-50 transition">
+                        <i class="fas fa-file-excel mr-1"></i> EXCEL
+                    </button>
+                    <button id="downloadJson" class="text-[10px] font-bold bg-white text-purple-600 px-3 py-1.5 rounded-lg border border-purple-100 hover:bg-purple-50 transition">
+                        <i class="fas fa-code mr-1"></i> JSON
+                    </button>
+                </div>
+            </div>
+
+            <textarea id="cveInput" rows="3"
+                class="w-full p-5 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-4 focus:ring-blue-50 focus:bg-white transition-all outline-none text-slate-600 font-mono text-sm mb-6"
+                placeholder="CVE-2021-44228, CVE-2023-23397..."></textarea>
+
+            <div class="flex items-center gap-4">
+                <button id="searchButton" class="btn-analyze flex-grow text-white py-4 rounded-2xl font-bold flex items-center justify-center shadow-lg shadow-blue-100">
+                    <i class="fas fa-magnifying-glass mr-2 text-sm"></i> Analyze CVEs
                 </button>
+                <button id="refreshButton" class="btn-refresh p-4 rounded-2xl flex items-center justify-center transition">
+                    <i class="fas fa-rotate-right"></i>
+                </button>
+            </div>
+
+            <div id="loading" class="hidden mt-8">
+                <div class="flex justify-between items-end mb-2">
+                    <div class="flex items-center">
+                        <i class="fas fa-circle-notch fa-spin text-blue-500 mr-3"></i>
+                        <span id="loadingStatus" class="text-sm font-bold text-slate-700">Initializing Scan...</span>
+                    </div>
+                    <span id="loadingCount" class="text-[10px] font-black text-slate-400 uppercase tracking-tighter">0 / 0</span>
+                </div>
+                <div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                    <div id="progressBar" class="progress-bar-fill h-full w-0"></div>
+                </div>
             </div>
         </div>
 
-        <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mb-6">
-            <div class="mb-4">
-                <label for="cveInput" class="block text-sm font-semibold text-gray-700 mb-2">Target CVE IDs:</label>
-                <textarea id="cveInput" rows="4" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition" placeholder="CVE-2021-44228, CVE-2023-23397..."></textarea>
+        <div id="summaryStats" class="hidden grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-10">
+            <div class="stat-card p-5 text-center theme-total">
+                <p class="text-[10px] font-black uppercase tracking-widest opacity-60 mb-1">Total</p>
+                <p id="stat-total" class="text-2xl font-extrabold">0</p>
             </div>
-            
-            <div class="flex flex-wrap gap-3">
-                <button id="searchButton" class="flex-1 min-w-[150px] bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700 transition shadow-lg">
-                    <i class="fas fa-search mr-2"></i>Analyze CVEs
-                </button>
-                <button id="downloadButton" class="hidden flex-1 min-w-[150px] bg-green-600 text-white font-bold py-3 rounded-lg hover:bg-green-700 transition shadow-lg">
-                    <i class="fas fa-file-excel mr-2"></i>Excel Report
-                </button>
-                <button id="clearButton" class="bg-gray-200 text-gray-700 px-6 py-3 rounded-lg hover:bg-gray-300 transition">
-                    <i class="fas fa-undo"></i>
-                </button>
+            <div class="stat-card p-5 text-center theme-critical">
+                <p class="text-[10px] font-black uppercase tracking-widest opacity-70 mb-1">Critical</p>
+                <p id="stat-critical" class="text-2xl font-extrabold">0</p>
             </div>
-
-            <div id="loading" class="hidden mt-4 p-4 bg-blue-50 text-blue-700 rounded-lg flex items-center justify-center">
-                <i class="fas fa-circle-notch fa-spin mr-3"></i>
-                <span id="loadingText">Processing vulnerabilities... (0/0)</span>
+            <div class="stat-card p-5 text-center theme-high">
+                <p class="text-[10px] font-black uppercase tracking-widest opacity-70 mb-1">High</p>
+                <p id="stat-high" class="text-2xl font-extrabold">0</p>
             </div>
-        </div>
-
-        <div id="summaryStats" class="hidden grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-            <div class="bg-white p-4 rounded-lg shadow-sm border-b-4 border-red-700">
-                <p class="text-xs text-gray-500 uppercase font-bold">Critical</p>
-                <p id="stat-critical" class="text-2xl font-black text-gray-800">0</p>
+            <div class="stat-card p-5 text-center theme-medium">
+                <p class="text-[10px] font-black uppercase tracking-widest opacity-70 mb-1">Medium</p>
+                <p id="stat-medium" class="text-2xl font-extrabold">0</p>
             </div>
-            <div class="bg-white p-4 rounded-lg shadow-sm border-b-4 border-red-500">
-                <p class="text-xs text-gray-500 uppercase font-bold">High</p>
-                <p id="stat-high" class="text-2xl font-black text-gray-800">0</p>
+            <div class="stat-card p-5 text-center theme-epss">
+                <p class="text-[10px] font-black uppercase tracking-widest opacity-70 mb-1">EPSS > 10%</p>
+                <p id="stat-epss-high" class="text-2xl font-extrabold">0</p>
             </div>
-            <div class="bg-white p-4 rounded-lg shadow-sm border-b-4 border-yellow-500">
-                <p class="text-xs text-gray-500 uppercase font-bold">Medium</p>
-                <p id="stat-medium" class="text-2xl font-black text-gray-800">0</p>
-            </div>
-            <div class="bg-white p-4 rounded-lg shadow-sm border-b-4 border-blue-500">
-                <p class="text-xs text-gray-500 uppercase font-bold">EPSS > 10%</p>
-                <p id="stat-epss" class="text-2xl font-black text-gray-800">0</p>
-            </div>
-            <div class="bg-white p-4 rounded-lg shadow-sm border-b-4 border-black bg-red-50">
-                <p class="text-xs text-red-600 uppercase font-bold"><i class="fas fa-biohazard mr-1"></i>CISA KEV</p>
-                <p id="stat-kev" class="text-2xl font-black text-red-700">0</p>
+            <div class="stat-card p-5 text-center theme-kev">
+                <p class="text-[10px] font-black uppercase tracking-widest opacity-70 mb-1">CISA KEV</p>
+                <p id="stat-kev" class="text-2xl font-extrabold">0</p>
             </div>
         </div>
 
-        <div id="filterContainer" class="hidden mb-4">
-            <div class="relative">
-                <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400">
-                    <i class="fas fa-filter"></i>
-                </span>
-                <input type="text" id="tableFilter" class="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:text-sm" placeholder="Filter results by ID or Package...">
-            </div>
-        </div>
-
-        <div id="tableContainer" class="hidden bg-white rounded-xl shadow-lg overflow-hidden border border-gray-200">
-            <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-100">
-                    <tr>
-                        <th onclick="sortResults('cveId')" class="px-6 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-200">
-                            CVE ID <i class="fas fa-sort sort-icon"></i>
-                        </th>
-                        <th class="px-6 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">
-                            Package
-                        </th>
-                        <th onclick="sortResults('epssRaw')" class="px-6 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-200">
-                            EPSS <i class="fas fa-sort sort-icon"></i>
-                        </th>
-                        <th onclick="sortResults('cvssScore')" class="px-6 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-200">
-                            CVSS <i class="fas fa-sort sort-icon"></i>
-                        </th>
+        <div id="tableContainer" class="hidden bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden">
+            <table class="min-w-full divide-y divide-slate-50">
+                <thead class="bg-slate-50/50">
+                    <tr class="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                        <th class="px-8 py-5 text-left">CVE Identification</th>
+                        <th class="px-8 py-5 text-left">Impacted Product</th>
+                        <th class="px-8 py-5 text-left">Exploit Prob.</th>
+                        <th class="px-8 py-5 text-center">Severity</th>
                     </tr>
                 </thead>
-                <tbody id="resultsTable" class="bg-white divide-y divide-gray-200"></tbody>
+                <tbody id="resultsTable" class="divide-y divide-slate-50"></tbody>
             </table>
         </div>
-        <div id="error" class="hidden mt-4 p-4 text-center text-red-600 bg-red-50 rounded-lg border border-red-200"></div>
     </div>
 
     <script>
-        // Global State
-        let cveResults = [];
-        let currentSort = { key: null, direction: 'asc' };
+        let cveData = [];
+        const CVE_REGEX = /\bCVE-\d{4}-\d{4,7}\b/gi;
 
-        const searchButton = document.getElementById('searchButton');
-        const downloadButton = document.getElementById('downloadButton');
-        const clearButton = document.getElementById('clearButton');
-        const exportJson = document.getElementById('exportJson');
-        const cveInput = document.getElementById('cveInput');
-        const loading = document.getElementById('loading');
-        const loadingText = document.getElementById('loadingText');
-        const errorDiv = document.getElementById('error');
-        const resultsTable = document.getElementById('resultsTable');
-        const tableContainer = document.getElementById('tableContainer');
-        const summaryStats = document.getElementById('summaryStats');
-        const tableFilter = document.getElementById('tableFilter');
-
-        const CVE_SOURCES = {
-            NVD: {
-                url: cveId => `https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=${cveId}`,
-                parse: data => data.vulnerabilities?.[0]?.cve || null,
-                directUrl: cveId => `https://nvd.nist.gov/vuln/detail/${cveId}`
-            },
-            EPSS: {
-                url: cveId => `https://api.first.org/data/v1/epss?cve=${cveId}`,
-                parse: data => data.data?.[0] || null,
-                directUrl: cveId => `https://www.first.org/epss/#!/search/${cveId}`
-            }
+        const THREAT_LINKS = {
+            "Wiz Database": id => `https://www.wiz.io/vulnerability-database/cve/${id.toLowerCase()}`,
+            "NVD Portal": id => `https://nvd.nist.gov/vuln/detail/${id}`,
+            "Snyk Intel": id => `https://snyk.io/vuln/${id}`,
+            "GitHub Advisory": id => `https://github.com/advisories?query=${id}`,
+            "MITRE AWG": id => `https://cveawg.mitre.org/api/cve/${id}`,
+            "Vulners Hub": id => `https://vulners.com/cve/${id}`,
+            "CVE.org": id => `https://www.cve.org/CVERecord?id=${id}`,
+            "CIRCL.lu": id => `https://cve.circl.lu/cve/${id}`
         };
 
-        async function fetchWithRetry(url, maxRetries = 2) {
-            for (let i = 0; i <= maxRetries; i++) {
+        async function analyze() {
+            const raw = document.getElementById('cveInput').value;
+            const matches = [...new Set((raw.match(CVE_REGEX) || []).map(c => c.toUpperCase()))];
+            if (matches.length === 0) return alert("Please enter valid CVE IDs.");
+
+            cveData = [];
+            const loader = document.getElementById('loading');
+            const progress = document.getElementById('progressBar');
+            loader.classList.remove('hidden');
+
+            for (let i = 0; i < matches.length; i++) {
+                const id = matches[i];
+                document.getElementById('loadingStatus').textContent = `Processing ${id}`;
+                document.getElementById('loadingCount').textContent = `${i + 1} / ${matches.length}`;
+                progress.style.width = `${((i + 1) / matches.length) * 100}%`;
+
                 try {
-                    const response = await fetch(url);
-                    if (response.status === 429) {
-                        await new Promise(r => setTimeout(r, 3000));
-                        continue;
-                    }
-                    if (!response.ok) throw new Error(`Status ${response.status}`);
-                    return await response.json();
-                } catch (e) {
-                    if (i === maxRetries) throw e;
-                    await new Promise(r => setTimeout(r, 1000));
-                }
-            }
-        }
-
-        function updateSummary() {
-            const stats = { critical: 0, high: 0, medium: 0, epss: 0, kev: 0 };
-            cveResults.forEach(r => {
-                if (r.severity === 'CRITICAL') stats.critical++;
-                if (r.severity === 'HIGH') stats.high++;
-                if (r.severity === 'MEDIUM') stats.medium++;
-                if (parseFloat(r.epssRaw) > 0.1) stats.epss++;
-                if (r.isKev) stats.kev++;
-            });
-
-            document.getElementById('stat-critical').textContent = stats.critical;
-            document.getElementById('stat-high').textContent = stats.high;
-            document.getElementById('stat-medium').textContent = stats.medium;
-            document.getElementById('stat-epss').textContent = stats.epss;
-            document.getElementById('stat-kev').textContent = stats.kev;
-            summaryStats.classList.remove('hidden');
-        }
-
-        function sortResults(key) {
-            const direction = currentSort.key === key && currentSort.direction === 'asc' ? 'desc' : 'asc';
-            currentSort = { key, direction };
-
-            cveResults.sort((a, b) => {
-                let valA = a[key];
-                let valB = b[key];
-                
-                // Handle numeric sorting
-                if (!isNaN(valA) && !isNaN(valB)) {
-                    valA = parseFloat(valA);
-                    valB = parseFloat(valB);
-                }
-
-                if (valA < valB) return direction === 'asc' ? -1 : 1;
-                if (valA > valB) return direction === 'asc' ? 1 : -1;
-                return 0;
-            });
-
-            renderAllRows(cveResults);
-        }
-
-        tableFilter.addEventListener('input', (e) => {
-            const term = e.target.value.toLowerCase();
-            const filtered = cveResults.filter(r => 
-                r.cveId.toLowerCase().includes(term) || 
-                r.vulnerablePackage.toLowerCase().includes(term)
-            );
-            renderAllRows(filtered);
-        });
-
-        function renderAllRows(data) {
-            resultsTable.innerHTML = '';
-            data.forEach((result, index) => renderTableRow(result, index));
-        }
-
-        function renderTableRow(result, index) {
-            const row = document.createElement('tr');
-            row.className = `hover:bg-blue-50 cursor-pointer transition ${result.isKev ? 'kev-row bg-red-50' : ''}`;
-            row.onclick = () => toggleRowDetails(index);
-            
-            const severityColor = getSeverityColor(result.severity);
-            const epssColor = getEPSSColor(result.epssRaw * 100);
-            
-            row.innerHTML = `
-                <td class="px-6 py-4">
-                    <div class="flex items-center">
-                        <i id="icon-${index}" class="fas fa-chevron-right text-gray-300 mr-3 text-xs"></i>
-                        <span class="font-bold text-gray-900">${result.cveId}</span>
-                        ${result.isKev ? '<span class="ml-2 bg-red-600 text-white text-xs px-2 py-0.5 rounded-full font-black animate-pulse">KEV</span>' : ''}
-                    </div>
-                </td>
-                <td class="px-6 py-4 text-sm font-medium text-gray-600">${result.vulnerablePackage}</td>
-                <td class="px-6 py-4">
-                    <span class="px-2 py-1 text-xs font-bold rounded-md ${epssColor}">${result.epssScore}</span>
-                </td>
-                <td class="px-6 py-4 text-sm">
-                    <span class="px-2 py-1 text-xs font-bold rounded-md ${severityColor}">${result.cvssScore} ${result.severity}</span>
-                </td>
-            `;
-
-            const detailsRow = document.createElement('tr');
-            detailsRow.id = `details-${index}`;
-            detailsRow.className = 'hidden bg-gray-50 border-l-4 border-blue-500';
-            detailsRow.innerHTML = `
-                <td colspan="4" class="px-10 py-6">
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <div>
-                            <h4 class="text-xs font-bold text-blue-600 uppercase tracking-widest mb-2">Description</h4>
-                            <p class="text-gray-700 leading-relaxed">${result.description}</p>
-                            <div class="mt-4 flex gap-2">
-                                <a href="https://nvd.nist.gov/vuln/detail/${result.cveId}" target="_blank" class="text-xs bg-white border border-gray-300 px-3 py-1 rounded shadow-sm hover:bg-gray-50">NVD Link <i class="fas fa-external-link-alt ml-1"></i></a>
-                                <a href="https://www.first.org/epss/#!/search/${result.cveId}" target="_blank" class="text-xs bg-white border border-gray-300 px-3 py-1 rounded shadow-sm hover:bg-gray-50">EPSS Data <i class="fas fa-external-link-alt ml-1"></i></a>
-                            </div>
-                        </div>
-                        <div>
-                            <h4 class="text-xs font-bold text-blue-600 uppercase tracking-widest mb-2">Metadata</h4>
-                            <ul class="text-sm space-y-2">
-                                <li><span class="text-gray-500">Published:</span> ${result.publishedDate}</li>
-                                <li><span class="text-gray-500">CISA KEV:</span> ${result.isKev ? '<span class="text-red-600 font-bold">Yes</span>' : 'No'}</li>
-                                <li><span class="text-gray-500">References:</span> ${result.references.length} found</li>
-                            </ul>
-                        </div>
-                    </div>
-                </td>
-            `;
-
-            resultsTable.appendChild(row);
-            resultsTable.appendChild(detailsRow);
-        }
-
-        async function searchCVEs() {
-            const input = cveInput.value.match(/CVE-\d{4}-\d{4,7}/gi);
-            if (!input) {
-                errorDiv.textContent = "Please enter valid CVE IDs (e.g. CVE-2021-44228)";
-                errorDiv.classList.remove('hidden');
-                return;
-            }
-
-            const cveList = [...new Set(input.map(c => c.toUpperCase()))];
-            cveResults = [];
-            loading.classList.remove('hidden');
-            errorDiv.classList.add('hidden');
-            resultsTable.innerHTML = '';
-            
-            for (let i = 0; i < cveList.length; i++) {
-                const cveId = cveList[i];
-                loadingText.textContent = `Analyzing ${cveId} (${i + 1}/${cveList.length})...`;
-                
-                try {
-                    const [nvdData, epssData] = await Promise.all([
-                        fetchWithRetry(CVE_SOURCES.NVD.url(cveId)),
-                        fetchWithRetry(CVE_SOURCES.EPSS.url(cveId))
+                    const [nvdRes, epssRes] = await Promise.all([
+                        fetch(`https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=${id}`).then(r => r.json()),
+                        fetch(`https://api.first.org/data/v1/epss?cve=${id}`).then(r => r.json())
                     ]);
 
-                    const cve = nvdData.vulnerabilities?.[0]?.cve;
-                    const metrics = cve?.metrics?.cvssMetricV31?.[0]?.cvssData || cve?.metrics?.cvssMetricV30?.[0]?.cvssData;
-                    
-                    const result = {
-                        cveId,
-                        cvssScore: metrics?.baseScore || 'N/A',
-                        severity: metrics?.baseSeverity || 'UNKNOWN',
-                        epssRaw: epssData?.data?.[0]?.epss || 0,
-                        epssScore: epssData?.data?.[0]?.epss ? (epssData.data[0].epss * 100).toFixed(2) + '%' : 'N/A',
-                        publishedDate: cve?.published ? new Date(cve.published).toLocaleDateString() : 'N/A',
-                        description: cve?.descriptions?.find(d => d.lang === 'en')?.value || 'No description found.',
-                        vulnerablePackage: extractPackage(cve),
-                        isKev: !!cve?.cisaExploitAdd,
-                        references: cve?.references?.map(r => r.url) || []
-                    };
+                    const nvd = nvdRes?.vulnerabilities?.[0]?.cve;
+                    const m = nvd?.metrics?.cvssMetricV31?.[0]?.cvssData || nvd?.metrics?.cvssMetricV30?.[0]?.cvssData;
 
-                    cveResults.push(result);
-                    renderTableRow(result, cveResults.length - 1);
-                    updateSummary();
+                    cveData.push({
+                        id,
+                        score: m?.baseScore || 0,
+                        severity: m?.baseSeverity || 'UNKNOWN',
+                        epssRaw: epssRes?.data?.[0]?.epss || 0,
+                        epssP: (epssRes?.data?.[0]?.epss * 100).toFixed(2) + '%',
+                        desc: nvd?.descriptions?.find(d => d.lang === 'en')?.value || "No detailed description provided.",
+                        isKev: !!nvd?.cisaExploitAdd,
+                        pkg: nvd?.configurations?.[0]?.nodes?.[0]?.cpeMatch?.[0]?.criteria?.split(':')[4] || 'N/A',
+                        refs: nvd?.references?.map(r => r.url) || []
+                    });
+                } catch (e) { console.error(e); }
 
-                    // Rate limit protection
-                    if (cveList.length > 1) await new Promise(r => setTimeout(r, 1500));
-
-                } catch (e) {
-                    console.error(e);
-                }
+                render();
+                updateStats();
+                if (matches.length > 1) await new Promise(r => setTimeout(r, 600));
             }
 
-            loading.classList.add('hidden');
-            tableContainer.classList.remove('hidden');
-            document.getElementById('filterContainer').classList.remove('hidden');
-            downloadButton.classList.remove('hidden');
-            exportJson.classList.remove('hidden');
+            loader.classList.add('hidden');
+            document.getElementById('exportGroup').classList.remove('hidden');
+            document.getElementById('summaryStats').classList.remove('hidden');
+            document.getElementById('tableContainer').classList.remove('hidden');
         }
 
-        function extractPackage(cve) {
-            try {
-                const nodes = cve?.configurations?.[0]?.nodes;
-                if (nodes) {
-                    for (const node of nodes) {
-                        const cpe = node.cpeMatch?.[0]?.criteria;
-                        if (cpe) return cpe.split(':')[4] || 'General';
-                    }
-                }
-            } catch (e) {}
-            return 'Multiple/Unknown';
+        function render() {
+            const tbody = document.getElementById('resultsTable');
+            tbody.innerHTML = '';
+
+            cveData.forEach((item, idx) => {
+                const row = document.createElement('tr');
+                row.className = `cursor-pointer transition-all hover:bg-slate-50/50 ${item.isKev ? 'border-l-4 border-purple-500' : ''}`;
+                row.onclick = () => document.getElementById(`detail-${idx}`).classList.toggle('hidden');
+
+                row.innerHTML = `
+                    <td class="px-8 py-5">
+                        <span class="font-bold text-slate-800">${item.id}</span>
+                        ${item.isKev ? '<span class="ml-2 text-[8px] font-black bg-purple-600 text-white px-1.5 py-0.5 rounded-full">CISA KEV</span>' : ''}
+                    </td>
+                    <td class="px-8 py-5 text-[11px] font-bold text-slate-400 uppercase tracking-tighter">${item.pkg}</td>
+                    <td class="px-8 py-5 text-xs font-bold text-blue-500">${item.epssP}</td>
+                    <td class="px-8 py-5 text-center">
+                        <span class="px-3 py-1 rounded-full text-[10px] font-black inline-block min-w-[90px] ${getSevTheme(item.severity)}">
+                            ${item.score} ${item.severity}
+                        </span>
+                    </td>
+                `;
+
+                const detail = document.createElement('tr');
+                detail.id = `detail-${idx}`;
+                detail.className = 'hidden bg-slate-50/30';
+                detail.innerHTML = `
+                    <td colspan="4" class="px-10 py-8">
+                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-12">
+                            <div class="lg:col-span-2">
+                                <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Vulnerability Summary</h4>
+                                <p class="text-sm text-slate-600 leading-relaxed mb-6">${item.desc}</p>
+                                <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Resources & References</h4>
+                                <div class="grid grid-cols-1 gap-2">
+                                    ${item.refs.slice(0, 4).map(r => `<a href="${r}" target="_blank" class="text-[11px] text-blue-400 hover:text-blue-600 truncate"><i class="fas fa-link mr-2 opacity-40"></i>${r}</a>`).join('')}
+                                </div>
+                            </div>
+                            <div>
+                                <h4 class="text-[10px] font-black text-purple-800 uppercase tracking-widest mb-4">Threat Research</h4>
+                                <div class="grid grid-cols-2 gap-3">
+                                    ${Object.entries(THREAT_LINKS).map(([name, fn]) => `
+                                        <a href="${fn(item.id)}" target="_blank" class="research-card p-3 rounded-xl text-[10px] font-bold text-center">
+                                            ${name}
+                                        </a>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(row);
+                tbody.appendChild(detail);
+            });
         }
 
-        function getSeverityColor(s) {
-            if (s === 'CRITICAL') return 'bg-red-700 text-white';
-            if (s === 'HIGH') return 'bg-red-100 text-red-800';
-            if (s === 'MEDIUM') return 'bg-yellow-100 text-yellow-800';
-            return 'bg-gray-100 text-gray-800';
+        function updateStats() {
+            const s = { total: cveData.length, crit: 0, high: 0, med: 0, epss: 0, kev: 0 };
+            cveData.forEach(d => {
+                if (d.severity === 'CRITICAL') s.crit++;
+                if (d.severity === 'HIGH') s.high++;
+                if (d.severity === 'MEDIUM') s.med++;
+                if (d.epssRaw > 0.1) s.epss++;
+                if (d.isKev) s.kev++;
+            });
+            document.getElementById('stat-total').textContent = s.total;
+            document.getElementById('stat-critical').textContent = s.crit;
+            document.getElementById('stat-high').textContent = s.high;
+            document.getElementById('stat-medium').textContent = s.med;
+            document.getElementById('stat-epss-high').textContent = s.epss;
+            document.getElementById('stat-kev').textContent = s.kev;
         }
 
-        function getEPSSColor(score) {
-            if (score > 10) return 'bg-orange-600 text-white';
-            if (score > 1) return 'bg-orange-100 text-orange-800';
-            return 'bg-green-100 text-green-800';
+        function getSevTheme(s) {
+            if (s === 'CRITICAL') return 'theme-critical';
+            if (s === 'HIGH') return 'theme-high';
+            if (s === 'MEDIUM') return 'theme-medium';
+            return 'bg-slate-100 text-slate-400';
         }
 
-        function toggleRowDetails(index) {
-            const el = document.getElementById(`details-${index}`);
-            const icon = document.getElementById(`icon-${index}`);
-            const isHidden = el.classList.contains('hidden');
-            el.classList.toggle('hidden');
-            icon.className = isHidden ? 'fas fa-chevron-down text-blue-500 mr-3 text-xs' : 'fas fa-chevron-right text-gray-300 mr-3 text-xs';
-        }
+        document.getElementById('searchButton').onclick = analyze;
+        document.getElementById('refreshButton').onclick = () => location.reload();
 
-        function downloadExcel() {
-            const ws = XLSX.utils.json_to_sheet(cveResults);
+        document.getElementById('downloadExcel').onclick = () => {
+            const ws = XLSX.utils.json_to_sheet(cveData);
             const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, "CVE Analysis");
-            XLSX.writeFile(wb, `CVE_Report_${new Date().getTime()}.xlsx`);
-        }
-
-        exportJson.onclick = () => {
-            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(cveResults, null, 2));
-            const dlAnchorElem = document.createElement('a');
-            dlAnchorElem.setAttribute("href", dataStr);
-            dlAnchorElem.setAttribute("download", "cve_data.json");
-            dlAnchorElem.click();
+            XLSX.utils.book_append_sheet(wb, ws, "Analysis");
+            XLSX.writeFile(wb, "CVE_Lookup_Report.xlsx");
         };
 
-        searchButton.onclick = searchCVEs;
-        downloadButton.onclick = downloadExcel;
-        clearButton.onclick = () => location.reload();
+        document.getElementById('downloadJson').onclick = () => {
+            const blob = new Blob([JSON.stringify(cveData, null, 2)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = "cve_data.json"; a.click();
+        };
     </script>
 </body>
 </html>
