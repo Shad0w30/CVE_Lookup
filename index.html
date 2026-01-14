@@ -3,297 +3,282 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CVE & SBOM Intel v4.0</title>
+    <title>CVE & SBOM Intel v5.0</title>
     <link href="https://unpkg.com/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
-        body { font-family: 'Inter', sans-serif; background-color: #fcfdfe; color: #334155; }
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; color: #1e293b; }
         
+        /* Research Links - Purple Theme */
         .research-card {
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: all 0.2s ease;
             border: 1px solid #f3e8ff;
             background: #faf5ff;
             color: #7e22ce;
         }
         .research-card:hover {
-            transform: translateY(-2px);
-            border-color: #d8b4fe;
+            border-color: #a855f7;
             background: #f3e8ff;
-            box-shadow: 0 4px 20px -2px rgba(126, 34, 206, 0.1);
         }
         
-        .progress-bar-fill {
-            transition: width 0.4s ease-out;
-            background: linear-gradient(90deg, #3b82f6, #8b5cf6);
-        }
+        /* Severity Pastels */
+        .theme-critical { background-color: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+        .theme-high { background-color: #ffedd5; color: #9a3412; border: 1px solid #fed7aa; }
+        .theme-medium { background-color: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+        .theme-total { background-color: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
 
-        .theme-total { background-color: #f1f5f9; color: #475569; border-color: #e2e8f0; }
-        .theme-critical { background-color: #fee2e2; color: #991b1b; border-color: #fecaca; }
-        .theme-high { background-color: #ffedd5; color: #9a3412; border-color: #fed7aa; }
-        .theme-medium { background-color: #fef3c7; color: #92400e; border-color: #fde68a; }
-        .theme-epss { background-color: #eff6ff; color: #1d4ed8; border-color: #dbeafe; }
-        .theme-kev { background-color: #f5f3ff; color: #5b21b6; border-color: #ddd6fe; }
-
-        .btn-analyze { background-color: #2563eb; transition: all 0.2s; }
-        .btn-analyze:hover { background-color: #1d4ed8; transform: translateY(-1px); }
-        .btn-refresh { background-color: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
+        /* Component Inventory Styling */
+        .component-tag { background: #f1f5f9; border: 1px solid #e2e8f0; color: #64748b; }
         
-        .upload-zone {
-            border: 2px dashed #e2e8f0;
-            transition: all 0.2s;
-        }
-        .upload-zone:hover { border-color: #3b82f6; background: #eff6ff; }
+        .progress-bar { height: 6px; background: #e2e8f0; border-radius: 10px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #3b82f6, #8b5cf6); transition: width 0.3s; }
         
-        .stat-card { border-width: 1px; border-radius: 1.25rem; transition: transform 0.2s; }
+        .upload-zone { border: 2px dashed #cbd5e1; border-radius: 1.5rem; transition: all 0.2s; cursor: pointer; }
+        .upload-zone:hover { border-color: #3b82f6; background: #f0f7ff; }
     </style>
 </head>
-<body class="min-h-screen pb-24">
-    <div class="container mx-auto p-6 max-w-6xl">
+<body class="p-4 md:p-10">
+    <div class="max-w-6xl mx-auto">
         
-        <div class="flex items-center mb-10 mt-4">
-            <div class="p-3 bg-blue-600 rounded-2xl shadow-lg mr-4">
-                <i class="fas fa-microchip text-white text-2xl"></i>
+        <div class="flex items-center mb-8">
+            <div class="p-3 bg-indigo-600 rounded-2xl shadow-lg mr-4 text-white">
+                <i class="fas fa-layer-group text-2xl"></i>
             </div>
-            <h1 class="text-3xl font-extrabold tracking-tight text-slate-900">
-                CVE & SBOM Scanner <span class="text-slate-300 text-sm font-medium ml-1">v4.0</span>
-            </h1>
+            <div>
+                <h1 class="text-3xl font-extrabold text-slate-900 tracking-tight">Vulnerability Intelligence</h1>
+                <p class="text-sm text-slate-400 font-medium">CVE Lookup & SBOM Inventory v5.0</p>
+            </div>
         </div>
 
-        <div class="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-8 mb-8">
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-6">
-                <div>
-                    <label class="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 block">Manual CVE Lookup:</label>
-                    <textarea id="cveInput" rows="4" 
-                        class="w-full p-5 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-4 focus:ring-blue-50 focus:bg-white transition-all outline-none text-slate-600 font-mono text-sm" 
-                        placeholder="Paste CVE-2021-44228..."></textarea>
-                </div>
-                <div>
-                    <label class="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 block">Upload SBOM (JSON):</label>
-                    <div id="dropZone" class="upload-zone h-[132px] rounded-2xl flex flex-col items-center justify-center cursor-pointer text-slate-400">
-                        <i class="fas fa-cloud-arrow-up text-2xl mb-2"></i>
-                        <span class="text-xs font-bold" id="fileName">Drag & Drop CycloneDX / SPDX</span>
-                        <input type="file" id="sbomFile" class="hidden" accept=".json">
-                    </div>
-                </div>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            <div class="lg:col-span-2 bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100">
+                <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block">Manual CVE Scan</label>
+                <textarea id="cveInput" rows="4" class="w-full p-4 bg-slate-50 border border-slate-100 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-mono text-sm" placeholder="Enter CVE IDs (e.g., CVE-2023-23397)"></textarea>
             </div>
-            
-            <div class="flex items-center gap-4">
-                <button id="searchButton" class="btn-analyze flex-grow text-white py-4 rounded-2xl font-bold flex items-center justify-center shadow-lg shadow-blue-100">
-                    <i class="fas fa-bolt mr-2 text-sm"></i> Run Full Analysis
-                </button>
-                <button id="refreshButton" class="btn-refresh p-4 rounded-2xl flex items-center justify-center transition">
-                    <i class="fas fa-rotate-right"></i>
-                </button>
-            </div>
-            
-            <div id="loading" class="hidden mt-8">
-                <div class="flex justify-between items-end mb-2">
-                    <div class="flex items-center">
-                        <i class="fas fa-circle-notch fa-spin text-blue-500 mr-3"></i>
-                        <span id="loadingStatus" class="text-sm font-bold text-slate-700">Identifying vulnerabilities...</span>
-                    </div>
-                    <span id="loadingCount" class="text-[10px] font-black text-slate-400">0 / 0</span>
-                </div>
-                <div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                    <div id="progressBar" class="progress-bar-fill h-full w-0"></div>
+            <div class="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col">
+                <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block">SBOM Integration</label>
+                <div id="dropZone" class="upload-zone flex-grow flex flex-col items-center justify-center p-4 text-center">
+                    <i class="fas fa-file-import text-slate-300 text-2xl mb-2"></i>
+                    <p id="fileStatus" class="text-xs font-bold text-slate-500 leading-tight">Drop SBOM JSON<br><span class="font-normal opacity-60">(CycloneDX/SPDX)</span></p>
+                    <input type="file" id="fileInput" class="hidden" accept=".json">
                 </div>
             </div>
         </div>
 
-        <div id="summaryStats" class="hidden grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-10">
-            <div class="stat-card p-5 text-center theme-total"><p class="text-[10px] font-black uppercase opacity-60 mb-1">Total</p><p id="stat-total" class="text-2xl font-extrabold">0</p></div>
-            <div class="stat-card p-5 text-center theme-critical"><p class="text-[10px] font-black uppercase opacity-70 mb-1">Critical</p><p id="stat-critical" class="text-2xl font-extrabold">0</p></div>
-            <div class="stat-card p-5 text-center theme-high"><p class="text-[10px] font-black uppercase opacity-70 mb-1">High</p><p id="stat-high" class="text-2xl font-extrabold">0</p></div>
-            <div class="stat-card p-5 text-center theme-medium"><p class="text-[10px] font-black uppercase opacity-70 mb-1">Medium</p><p id="stat-medium" class="text-2xl font-extrabold">0</p></div>
-            <div class="stat-card p-5 text-center theme-epss"><p class="text-[10px] font-black uppercase opacity-70 mb-1">EPSS > 10%</p><p id="stat-epss-high" class="text-2xl font-extrabold">0</p></div>
-            <div class="stat-card p-5 text-center theme-kev"><p class="text-[10px] font-black uppercase opacity-70 mb-1">CISA KEV</p><p id="stat-kev" class="text-2xl font-extrabold">0</p></div>
+        <div class="flex flex-col md:flex-row gap-4 mb-8 items-center">
+            <button id="runScan" class="w-full md:w-auto px-8 py-4 bg-blue-600 text-white rounded-2xl font-bold shadow-lg shadow-blue-100 hover:bg-blue-700 transition flex items-center justify-center">
+                <i class="fas fa-bolt-lightning mr-2"></i> Initiate Analysis
+            </button>
+            <div id="loader" class="hidden flex-grow px-4">
+                <div class="flex justify-between text-[10px] font-black text-slate-400 uppercase mb-1">
+                    <span id="loadText">Processing...</span>
+                    <span id="loadCount">0 / 0</span>
+                </div>
+                <div class="progress-bar"><div id="progressFill" class="progress-fill" style="width: 0%"></div></div>
+            </div>
         </div>
 
-        <div id="tableContainer" class="hidden bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden">
-            <table class="min-w-full divide-y divide-slate-50">
-                <thead class="bg-slate-50/50">
+        <div id="statsGrid" class="hidden grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-8">
+            <div class="theme-total p-4 rounded-2xl text-center"><p class="text-[10px] font-black uppercase mb-1 opacity-60">Total CVEs</p><p id="count-total" class="text-2xl font-black">0</p></div>
+            <div class="theme-critical p-4 rounded-2xl text-center"><p class="text-[10px] font-black uppercase mb-1 opacity-80">Critical</p><p id="count-crit" class="text-2xl font-black">0</p></div>
+            <div class="theme-high p-4 rounded-2xl text-center"><p class="text-[10px] font-black uppercase mb-1 opacity-80">High</p><p id="count-high" class="text-2xl font-black">0</p></div>
+            <div class="theme-medium p-4 rounded-2xl text-center"><p class="text-[10px] font-black uppercase mb-1 opacity-80">Medium</p><p id="count-med" class="text-2xl font-black">0</p></div>
+            <div class="bg-blue-50 text-blue-700 border border-blue-100 p-4 rounded-2xl text-center"><p class="text-[10px] font-black uppercase mb-1 opacity-70">SBOM Items</p><p id="count-sbom" class="text-2xl font-black">0</p></div>
+            <div class="bg-purple-50 text-purple-700 border border-purple-100 p-4 rounded-2xl text-center"><p class="text-[10px] font-black uppercase mb-1 opacity-70">CISA KEV</p><p id="count-kev" class="text-2xl font-black">0</p></div>
+        </div>
+
+        <div id="sbomInventory" class="hidden mb-8">
+            <h3 class="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 ml-2">Software Bill of Materials (SBOM) Inventory</h3>
+            <div class="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm max-h-64 overflow-y-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3" id="inventoryList">
+                </div>
+        </div>
+
+        <div id="resultsView" class="hidden bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
+            <table class="min-w-full">
+                <thead class="bg-slate-50/50 border-b border-slate-100">
                     <tr class="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                        <th class="px-8 py-5 text-left">Security Identifier</th>
-                        <th class="px-8 py-5 text-left">Origin / Component</th>
-                        <th class="px-8 py-5 text-left">Exploit Prob.</th>
-                        <th class="px-8 py-5 text-center">CVSS Severity</th>
+                        <th class="px-8 py-5 text-left">Security ID</th>
+                        <th class="px-8 py-5 text-left">Source / Component</th>
+                        <th class="px-8 py-5 text-center">Severity</th>
                     </tr>
                 </thead>
-                <tbody id="resultsTable" class="divide-y divide-slate-50"></tbody>
+                <tbody id="vulnTable" class="divide-y divide-slate-50"></tbody>
             </table>
         </div>
     </div>
 
     <script>
-        let cveData = [];
-        let sbomCves = [];
         const CVE_REGEX = /\bCVE-\d{4}-\d{4,7}\b/gi;
+        let findings = [];
+        let components = [];
 
-        const THREAT_LINKS = {
-            "Wiz Database": id => `https://www.wiz.io/vulnerability-database/cve/${id.toLowerCase()}`,
-            "NVD Portal": id => `https://nvd.nist.gov/vuln/detail/${id}`,
-            "Snyk Intel": id => `https://snyk.io/vuln/${id}`,
-            "GitHub Advisory": id => `https://github.com/advisories?query=${id}`,
-            "MITRE AWG": id => `https://cveawg.mitre.org/api/cve/${id}`,
-            "Vulners Hub": id => `https://vulners.com/cve/${id}`
+        // UI Selectors
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const vulnTable = document.getElementById('vulnTable');
+        const inventoryList = document.getElementById('inventoryList');
+
+        // SBOM File Logic
+        dropZone.onclick = () => fileInput.click();
+        fileInput.onchange = async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            document.getElementById('fileStatus').innerHTML = `<span class="text-blue-600">${file.name}</span><br><span class="text-[10px] opacity-60">Ready to scan</span>`;
+            
+            try {
+                const data = JSON.parse(await file.text());
+                components = (data.components || data.packages || []).map(c => ({
+                    name: c.name || "Unknown",
+                    version: c.version || "N/A",
+                    purl: c.purl || ""
+                }));
+            } catch (err) { alert("Invalid JSON SBOM."); }
         };
 
-        // SBOM Handling
-        const dropZone = document.getElementById('dropZone');
-        const fileInput = document.getElementById('sbomFile');
-        dropZone.onclick = () => fileInput.click();
-        fileInput.onchange = (e) => handleFile(e.target.files[0]);
-
-        async function handleFile(file) {
-            if (!file) return;
-            document.getElementById('fileName').textContent = file.name;
-            const text = await file.text();
+        async function apiFetch(url) {
+            // NVD Rate Limiting Buffer
+            await new Promise(r => setTimeout(r, 650));
             try {
-                const json = JSON.parse(text);
-                const components = json.components || json.packages || [];
-                sbomCves = [];
-                
-                // Logic to extract PURLs/Names for scanning
-                for(let comp of components) {
-                    const name = comp.name;
-                    const version = comp.version;
-                    if(name && version) sbomCves.push({ name, version });
-                }
-                console.log("SBOM Components extracted:", sbomCves.length);
-            } catch (e) { alert("Invalid JSON SBOM format."); }
+                const r = await fetch(url);
+                if (r.status === 403) return { error: "Rate Limited" };
+                return await r.json();
+            } catch (e) { return { error: "Network Error" }; }
         }
 
-        async function analyze() {
-            const raw = document.getElementById('cveInput').value;
-            const manualMatches = [...new Set((raw.match(CVE_REGEX) || []).map(c => c.toUpperCase()))];
+        async function runAnalysis() {
+            const rawCves = document.getElementById('cveInput').value.match(CVE_REGEX) || [];
+            const uniqueCves = [...new Set(rawCves.map(c => c.toUpperCase()))];
             
-            cveData = [];
-            const loader = document.getElementById('loading');
-            const progress = document.getElementById('progressBar');
-            loader.classList.remove('hidden');
-
-            // 1. Process Manual CVEs
-            for (let i = 0; i < manualMatches.length; i++) {
-                const id = manualMatches[i];
-                document.getElementById('loadingStatus').textContent = `Checking ${id}`;
-                document.getElementById('loadingCount').textContent = `${i + 1} / ${manualMatches.length}`;
-                progress.style.width = `${((i + 1) / (manualMatches.length + sbomCves.length)) * 100}%`;
-                await fetchCveDetails(id, "Manual Input");
+            findings = [];
+            document.getElementById('loader').classList.remove('hidden');
+            const totalTasks = uniqueCves.length + components.length;
+            
+            // 1. Process Manual CVEs (With Validation)
+            for(let i=0; i < uniqueCves.length; i++) {
+                const cveId = uniqueCves[i];
+                updateLoader(`Validating ${cveId}`, i + 1, totalTasks);
+                await processCve(cveId, "Manual Input");
             }
 
-            // 2. Process SBOM Components (Conceptual NVD keyword search)
-            for (let i = 0; i < sbomCves.length; i++) {
-                const comp = sbomCves[i];
-                document.getElementById('loadingStatus').textContent = `Scanning ${comp.name}`;
-                progress.style.width = `${((manualMatches.length + i + 1) / (manualMatches.length + sbomCves.length)) * 100}%`;
-                
-                // Note: For real-world SBOM, you'd hit an API like OSS Index or NVD CPE search
-                // Here we perform a keyword search for the component name to find related CVEs
-                try {
-                    const res = await fetch(`https://services.nvd.nist.gov/rest/json/cves/2.0?keywordSearch=${comp.name} ${comp.version}`).then(r => r.json());
-                    const found = res?.vulnerabilities?.slice(0, 2) || []; // Limit to top 2 for speed
-                    for(let v of found) {
-                        await fetchCveDetails(v.cve.id, comp.name);
+            // 2. Process SBOM Components
+            for(let i=0; i < components.length; i++) {
+                const comp = components[i];
+                updateLoader(`Checking ${comp.name}`, uniqueCves.length + i + 1, totalTasks);
+                // In a browser tool, we search by keyword to approximate matches
+                const search = await apiFetch(`https://services.nvd.nist.gov/rest/json/cves/2.0?keywordSearch=${comp.name} ${comp.version}`);
+                if(search.vulnerabilities) {
+                    for(let v of search.vulnerabilities.slice(0, 2)) {
+                        await processCve(v.cve.id, comp.name);
                     }
-                } catch(e) {}
-                if (i % 2 === 0) await new Promise(r => setTimeout(r, 600)); // NVD Rate limiting
+                }
             }
 
-            loader.classList.add('hidden');
-            document.getElementById('summaryStats').classList.remove('hidden');
-            document.getElementById('tableContainer').classList.remove('hidden');
+            finalizeUI();
         }
 
-        async function fetchCveDetails(id, source) {
-            try {
-                const [nvdRes, epssRes] = await Promise.all([
-                    fetch(`https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=${id}`).then(r => r.json()),
-                    fetch(`https://api.first.org/data/v1/epss?cve=${id}`).then(r => r.json())
-                ]);
+        async function processCve(id, source) {
+            // Check if already found
+            if(findings.some(f => f.id === id)) return;
 
-                const nvd = nvdRes?.vulnerabilities?.[0]?.cve;
-                const m = nvd?.metrics?.cvssMetricV31?.[0]?.cvssData || nvd?.metrics?.cvssMetricV30?.[0]?.cvssData;
-                
-                cveData.push({
-                    id,
-                    score: m?.baseScore || 0,
-                    severity: m?.baseSeverity || 'UNKNOWN',
-                    epssRaw: epssRes?.data?.[0]?.epss || 0,
-                    epssP: (epssRes?.data?.[0]?.epss * 100).toFixed(2) + '%',
-                    desc: nvd?.descriptions?.find(d => d.lang === 'en')?.value || "No data.",
-                    isKev: !!nvd?.cisaExploitAdd,
-                    pkg: source,
-                    refs: nvd?.references?.map(r => r.url) || []
+            const [nvd, epss] = await Promise.all([
+                apiFetch(`https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=${id}`),
+                apiFetch(`https://api.first.org/data/v1/epss?cve=${id}`)
+            ]);
+
+            if(nvd.vulnerabilities?.length > 0) {
+                const c = nvd.vulnerabilities[0].cve;
+                const m = c.metrics?.cvssMetricV31?.[0]?.cvssData || c.metrics?.cvssMetricV30?.[0]?.cvssData;
+                findings.push({
+                    id, source,
+                    score: m?.baseScore || "N/A",
+                    severity: m?.baseSeverity || "UNKNOWN",
+                    desc: c.descriptions.find(d => d.lang === 'en')?.value || "No description.",
+                    isKev: !!c.cisaExploitAdd,
+                    refs: c.references?.map(r => r.url) || []
                 });
-                render();
+                renderTable();
                 updateStats();
-            } catch (e) {}
+            }
         }
 
-        function render() {
-            const tbody = document.getElementById('resultsTable');
-            tbody.innerHTML = '';
-            cveData.forEach((item, idx) => {
-                const row = document.createElement('tr');
-                row.className = `cursor-pointer transition-all hover:bg-slate-50/50 ${item.isKev ? 'border-l-4 border-purple-500' : ''}`;
-                row.onclick = () => document.getElementById(`detail-${idx}`).classList.toggle('hidden');
-                row.innerHTML = `
+        function updateLoader(text, count, total) {
+            document.getElementById('loadText').innerText = text;
+            document.getElementById('loadCount').innerText = `${count} / ${total}`;
+            document.getElementById('progressFill').style.width = `${(count/total)*100}%`;
+        }
+
+        function renderTable() {
+            vulnTable.innerHTML = findings.map((f, idx) => `
+                <tr class="hover:bg-slate-50/50 transition cursor-pointer" onclick="toggleRow(${idx})">
                     <td class="px-8 py-5">
-                        <span class="font-bold text-slate-800">${item.id}</span>
-                        ${item.isKev ? '<span class="ml-2 text-[8px] font-black bg-purple-600 text-white px-1.5 py-0.5 rounded-full uppercase">CISA KEV</span>' : ''}
+                        <span class="font-bold text-slate-800">${f.id}</span>
+                        ${f.isKev ? '<span class="ml-2 text-[8px] font-black bg-purple-600 text-white px-2 py-0.5 rounded-full uppercase">KEV</span>' : ''}
                     </td>
-                    <td class="px-8 py-5 text-[11px] font-bold text-slate-400 uppercase">${item.pkg}</td>
-                    <td class="px-8 py-5 text-xs font-bold text-blue-500">${item.epssP}</td>
+                    <td class="px-8 py-5 text-[10px] font-bold text-slate-400 uppercase truncate max-w-[200px]">${f.source}</td>
                     <td class="px-8 py-5 text-center">
-                        <span class="px-3 py-1 rounded-full text-[10px] font-black inline-block min-w-[90px] ${getSevTheme(item.severity)}">
-                            ${item.score} ${item.severity}
+                        <span class="px-3 py-1 rounded-full text-[10px] font-black inline-block min-w-[90px] ${getSevTheme(f.severity)}">
+                            ${f.score} ${f.severity}
                         </span>
                     </td>
-                `;
-                const detail = document.createElement('tr');
-                detail.id = `detail-${idx}`;
-                detail.className = 'hidden bg-slate-50/30';
-                detail.innerHTML = `
-                    <td colspan="4" class="px-10 py-8">
-                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-12">
+                </tr>
+                <tr id="row-${idx}" class="hidden bg-slate-50/30">
+                    <td colspan="3" class="px-10 py-6">
+                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
                             <div class="lg:col-span-2">
-                                <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Vulnerability Detail</h4>
-                                <p class="text-sm text-slate-600 leading-relaxed mb-6">${item.desc}</p>
-                                <div class="grid grid-cols-1 gap-2">
-                                    ${item.refs.slice(0, 3).map(r => `<a href="${r}" target="_blank" class="text-[11px] text-blue-400 truncate"><i class="fas fa-link mr-2 opacity-40"></i>${r}</a>`).join('')}
-                                </div>
+                                <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Description</h4>
+                                <p class="text-sm text-slate-600 leading-relaxed">${f.desc}</p>
                             </div>
                             <div>
-                                <h4 class="text-[10px] font-black text-purple-800 uppercase tracking-widest mb-4">Threat Research</h4>
-                                <div class="grid grid-cols-2 gap-3">
-                                    ${Object.entries(THREAT_LINKS).map(([name, fn]) => `<a href="${fn(item.id)}" target="_blank" class="research-card p-3 rounded-xl text-[10px] font-bold text-center">${name}</a>`).join('')}
+                                <h4 class="text-[10px] font-black text-purple-800 uppercase tracking-widest mb-3">Threat Research</h4>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <a href="https://nvd.nist.gov/vuln/detail/${f.id}" target="_blank" class="research-card p-2 rounded-lg text-[9px] font-bold text-center">NVD</a>
+                                    <a href="https://www.wiz.io/vulnerability-database/cve/${f.id.toLowerCase()}" target="_blank" class="research-card p-2 rounded-lg text-[9px] font-bold text-center">Wiz Intel</a>
+                                    <a href="https://snyk.io/vuln/${f.id}" target="_blank" class="research-card p-2 rounded-lg text-[9px] font-bold text-center">Snyk</a>
+                                    <a href="https://github.com/advisories?query=${f.id}" target="_blank" class="research-card p-2 rounded-lg text-[9px] font-bold text-center">GitHub</a>
                                 </div>
                             </div>
                         </div>
                     </td>
-                `;
-                tbody.appendChild(row);
-                tbody.appendChild(detail);
-            });
+                </tr>
+            `).join('');
+        }
+
+        function finalizeUI() {
+            document.getElementById('loader').classList.add('hidden');
+            document.getElementById('statsGrid').classList.remove('hidden');
+            document.getElementById('resultsView').classList.remove('hidden');
+            
+            // Render Component Inventory
+            if(components.length > 0) {
+                document.getElementById('sbomInventory').classList.remove('hidden');
+                inventoryList.innerHTML = components.map(c => `
+                    <div class="flex items-center justify-between p-3 component-tag rounded-xl">
+                        <div class="truncate mr-2">
+                            <p class="text-[11px] font-bold text-slate-700 truncate">${c.name}</p>
+                            <p class="text-[9px] text-slate-400">v${c.version}</p>
+                        </div>
+                        <i class="fas fa-check-circle text-blue-400 text-xs"></i>
+                    </div>
+                `).join('');
+            }
         }
 
         function updateStats() {
-            const s = { total: cveData.length, crit: 0, high: 0, med: 0, epss: 0, kev: 0 };
-            cveData.forEach(d => {
-                if (d.severity === 'CRITICAL') s.crit++;
-                if (d.severity === 'HIGH') s.high++;
-                if (d.severity === 'MEDIUM') s.med++;
-                if (d.epssRaw > 0.1) s.epss++;
-                if (d.isKev) s.kev++;
+            const s = { total: findings.length, crit: 0, high: 0, med: 0, kev: 0 };
+            findings.forEach(f => {
+                if(f.severity === 'CRITICAL') s.crit++;
+                if(f.severity === 'HIGH') s.high++;
+                if(f.severity === 'MEDIUM') s.med++;
+                if(f.isKev) s.kev++;
             });
-            document.getElementById('stat-total').textContent = s.total;
-            document.getElementById('stat-critical').textContent = s.crit;
-            document.getElementById('stat-high').textContent = s.high;
-            document.getElementById('stat-medium').textContent = s.med;
-            document.getElementById('stat-epss-high').textContent = s.epss;
-            document.getElementById('stat-kev').textContent = s.kev;
+            document.getElementById('count-total').innerText = s.total;
+            document.getElementById('count-crit').innerText = s.crit;
+            document.getElementById('count-high').innerText = s.high;
+            document.getElementById('count-med').innerText = s.med;
+            document.getElementById('count-sbom').innerText = components.length;
+            document.getElementById('count-kev').innerText = s.kev;
         }
 
         function getSevTheme(s) {
@@ -303,8 +288,8 @@
             return 'bg-slate-100 text-slate-400';
         }
 
-        document.getElementById('searchButton').onclick = analyze;
-        document.getElementById('refreshButton').onclick = () => location.reload();
+        function toggleRow(i) { document.getElementById(`row-${i}`).classList.toggle('hidden'); }
+        document.getElementById('runScan').onclick = runAnalysis;
     </script>
 </body>
 </html>
